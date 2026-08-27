@@ -15,6 +15,13 @@ const pageTitles: Record<string, string> = {
   '/admin/reports': 'Hospital Reports',
   '/admin/hospital-info': 'Hospital Information',
   '/admin/settings': 'Settings',
+  // AI Modules
+  '/admin/overview': 'AI Module Overview',
+  '/admin/revenue-cycle': 'Revenue Cycle Management',
+  '/admin/revenue-cycle/claims': 'Claims Management',
+  '/admin/bed-allocation': 'Predictive Bed Allocation',
+  '/admin/bed-allocation/forecast': 'Bed Demand Forecast',
+  // Doctor
   '/doctor/dashboard': 'Doctor Dashboard',
   '/doctor/my-patients': 'My Patients',
   '/doctor/appointments': 'My Appointments',
@@ -30,10 +37,15 @@ const AppLayout: React.FC = () => {
   const { user } = useAuth();
 
   const getTitle = () => {
-    const basePath = location.pathname.replace(/\/[^/]+$/, '') === location.pathname
-      ? location.pathname
-      : Object.keys(pageTitles).find(k => location.pathname.startsWith(k)) || location.pathname;
-    return pageTitles[basePath] || pageTitles[location.pathname] || 'Meridian Hospital';
+    // Exact match first
+    if (pageTitles[location.pathname]) return pageTitles[location.pathname];
+    // Claim detail dynamic route
+    if (location.pathname.match(/\/admin\/revenue-cycle\/claims\/CLM/)) return 'Claim Detail';
+    if (location.pathname.match(/\/admin\/patients\/P/)) return 'Patient Profile';
+    if (location.pathname.match(/\/doctor\/patient-records\//)) return 'Patient Records';
+    // Prefix match
+    const match = Object.keys(pageTitles).find(k => location.pathname.startsWith(k));
+    return match ? pageTitles[match] : 'Meridian Hospital';
   };
 
   return (
@@ -44,7 +56,7 @@ const AppLayout: React.FC = () => {
         <main className="main-content">
           <Outlet />
           <footer className="app-footer">
-            Meridian Hospital | Kolathur, Chennai | Prototype / Demo Environment
+            Meridian Hospital | Kolathur, Chennai | AI RCM & Bed Allocation POC — Demo Environment
           </footer>
         </main>
       </div>

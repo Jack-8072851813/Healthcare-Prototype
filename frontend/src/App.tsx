@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { RoleProvider } from './context/RoleContext';
 import LoginPage from './pages/LoginPage';
 import AppLayout from './components/AppLayout';
 
@@ -16,6 +17,18 @@ import PreAdmissionPage from './pages/admin/PreAdmissionPage';
 import ReportsPage from './pages/admin/ReportsPage';
 import HospitalInfoPage from './pages/admin/HospitalInfoPage';
 import SettingsPage from './pages/admin/SettingsPage';
+
+// AI Module Pages — Overview
+import OverviewPage from './pages/admin/OverviewPage';
+
+// AI Module Pages — Revenue Cycle
+import RCMDashboard from './pages/admin/rcm/RCMDashboard';
+import ClaimList from './pages/admin/rcm/ClaimList';
+import ClaimDetail from './pages/admin/rcm/ClaimDetail';
+
+// AI Module Pages — Bed Allocation
+import BedDashboard from './pages/admin/beds/BedDashboard';
+import BedForecast from './pages/admin/beds/BedForecast';
 
 // Doctor Pages
 import DoctorDashboard from './pages/doctor/DoctorDashboard';
@@ -63,6 +76,14 @@ const AppRoutes: React.FC = () => {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="hospital-info" element={<HospitalInfoPage />} />
         <Route path="settings" element={<SettingsPage />} />
+
+        {/* AI Modules */}
+        <Route path="overview" element={<OverviewPage />} />
+        <Route path="revenue-cycle" element={<RCMDashboard />} />
+        <Route path="revenue-cycle/claims" element={<ClaimList />} />
+        <Route path="revenue-cycle/claims/:id" element={<ClaimDetail />} />
+        <Route path="bed-allocation" element={<BedDashboard />} />
+        <Route path="bed-allocation/forecast" element={<BedForecast />} />
       </Route>
 
       {/* Doctor Routes */}
@@ -88,7 +109,9 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => (
   <BrowserRouter>
     <AuthProvider>
-      <AppRoutes />
+      <RoleProvider>
+        <AppRoutes />
+      </RoleProvider>
     </AuthProvider>
   </BrowserRouter>
 );
