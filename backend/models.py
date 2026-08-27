@@ -116,3 +116,55 @@ class AdmissionForecast(BaseModel):
     time_horizons: List[str]
     departments: List[str]
     data: List[dict]
+
+
+# ── Radiology Models ──────────────────────────────────────────────────────────
+
+class TriagePriorityEnum(str, Enum):
+    critical = "CRITICAL"
+    high = "HIGH"
+    routine = "ROUTINE"
+    processing = "PROCESSING"
+
+
+class RadiologyStudyModel(BaseModel):
+    id: str
+    patientId: str
+    modality: str
+    bodyPart: str
+    studyTime: str
+    studyDate: str
+    aiFinding: str
+    confidenceScore: int
+    priority: TriagePriorityEnum
+    aiStatus: str
+    modelVersion: str
+    inferenceTimeSeconds: float
+    probabilities: dict
+    heatmapRegion: Optional[dict] = None
+    feedback: dict
+    patientAge: Optional[int] = None
+    patientGender: Optional[str] = None
+    referringPhysician: Optional[str] = None
+
+
+class RadiologyDashboardSummaryModel(BaseModel):
+    totalStudies: int
+    critical: int
+    high: int
+    routine: int
+    awaitingAnalysis: int
+    agreementRate: int
+
+
+class RadiologyFeedbackRequest(BaseModel):
+    status: str
+    comments: Optional[str] = None
+
+
+class AnalyzeXRayRequest(BaseModel):
+    studyId: Optional[str] = None
+    modality: Optional[str] = "CR"
+    bodyPart: Optional[str] = "CHEST"
+    imageFileName: Optional[str] = None
+

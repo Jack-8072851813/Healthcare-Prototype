@@ -30,6 +30,16 @@ import ClaimDetail from './pages/admin/rcm/ClaimDetail';
 import BedDashboard from './pages/admin/beds/BedDashboard';
 import BedForecast from './pages/admin/beds/BedForecast';
 
+// AI Module Pages — Radiology Triage Assistant
+import RadiologyDashboard from './pages/admin/radiology/RadiologyDashboard';
+import RadiologyWorklist from './pages/admin/radiology/RadiologyWorklist';
+import AnalyzeXRay from './pages/admin/radiology/AnalyzeXRay';
+import StudyDetail from './pages/admin/radiology/StudyDetail';
+import ModelPerformance from './pages/admin/radiology/ModelPerformance';
+import DatabricksPipeline from './pages/admin/radiology/DatabricksPipeline';
+import ArchitecturePage from './pages/admin/radiology/ArchitecturePage';
+import AboutPoC from './pages/admin/radiology/AboutPoC';
+
 // Doctor Pages
 import DoctorDashboard from './pages/doctor/DoctorDashboard';
 import MyPatients from './pages/doctor/MyPatients';
@@ -84,6 +94,16 @@ const AppRoutes: React.FC = () => {
         <Route path="revenue-cycle/claims/:id" element={<ClaimDetail />} />
         <Route path="bed-allocation" element={<BedDashboard />} />
         <Route path="bed-allocation/forecast" element={<BedForecast />} />
+
+        {/* Radiology Triage Assistant */}
+        <Route path="radiology" element={<RadiologyDashboard />} />
+        <Route path="radiology/worklist" element={<RadiologyWorklist />} />
+        <Route path="radiology/analyze" element={<AnalyzeXRay />} />
+        <Route path="radiology/studies/:id" element={<StudyDetail />} />
+        <Route path="radiology/performance" element={<ModelPerformance />} />
+        <Route path="radiology/pipeline" element={<DatabricksPipeline />} />
+        <Route path="radiology/architecture" element={<ArchitecturePage />} />
+        <Route path="radiology/about" element={<AboutPoC />} />
       </Route>
 
       {/* Doctor Routes */}

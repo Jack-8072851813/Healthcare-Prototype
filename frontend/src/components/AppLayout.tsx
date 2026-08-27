@@ -21,6 +21,14 @@ const pageTitles: Record<string, string> = {
   '/admin/revenue-cycle/claims': 'Claims Management',
   '/admin/bed-allocation': 'Predictive Bed Allocation',
   '/admin/bed-allocation/forecast': 'Bed Demand Forecast',
+  // AI Radiology Triage Assistant
+  '/admin/radiology': 'Meridian AI Radiology Triage Assistant',
+  '/admin/radiology/worklist': 'AI Triage Radiology Worklist',
+  '/admin/radiology/analyze': 'Analyze New Chest X-Ray',
+  '/admin/radiology/performance': 'AI Model Performance Metrics',
+  '/admin/radiology/pipeline': 'Databricks AI Pipeline Architecture',
+  '/admin/radiology/architecture': 'System Architecture Overview',
+  '/admin/radiology/about': 'About Radiology Triage PoC',
   // Doctor
   '/doctor/dashboard': 'Doctor Dashboard',
   '/doctor/my-patients': 'My Patients',
@@ -39,7 +47,8 @@ const AppLayout: React.FC = () => {
   const getTitle = () => {
     // Exact match first
     if (pageTitles[location.pathname]) return pageTitles[location.pathname];
-    // Claim detail dynamic route
+    // Dynamic route matching
+    if (location.pathname.match(/\/admin\/radiology\/studies\/CXR/)) return 'Chest X-Ray Study Detail';
     if (location.pathname.match(/\/admin\/revenue-cycle\/claims\/CLM/)) return 'Claim Detail';
     if (location.pathname.match(/\/admin\/patients\/P/)) return 'Patient Profile';
     if (location.pathname.match(/\/doctor\/patient-records\//)) return 'Patient Records';

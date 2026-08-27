@@ -66,6 +66,25 @@ const OverviewPage: React.FC = () => {
 
   const modules: ModuleDef[] = [
     {
+      key: 'radiology',
+      title: 'AI Radiology Triage Assistant',
+      icon: <Activity size={28} style={{ color: '#E53E3E' }} />,
+      accentColor: '#E53E3E',
+      description: 'AI-assisted Chest X-Ray triage worklist prioritization & Databricks inference pipeline',
+      kpis: [
+        { label: 'Total Studies', value: 18, icon: <FileText size={16} />, color: '#4A90D9' },
+        { label: 'Critical', value: 3, icon: <AlertTriangle size={16} />, color: '#E53E3E' },
+        { label: 'High Priority', value: 5, icon: <Activity size={16} />, color: '#E8850A' },
+        { label: 'Agreement %', value: '94%', icon: <CheckCircle size={16} />, color: '#48BB78' },
+      ],
+      alerts: [
+        { text: 'CXR-2026-017 — Possible Pneumothorax (94% confidence) — CRITICAL Priority', type: 'critical' },
+        { text: 'CXR-2026-015 — Possible Pneumothorax (91% confidence) — CRITICAL Priority', type: 'critical' },
+      ],
+      primaryAction: { label: 'Open Radiology Triage', path: '/admin/radiology' },
+      secondaryAction: { label: 'View Worklist', path: '/admin/radiology/worklist' },
+    },
+    {
       key: 'rcm',
       title: 'Revenue Cycle Management',
       icon: <FileText size={28} style={{ color: '#E8850A' }} />,

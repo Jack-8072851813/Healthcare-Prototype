@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, UserCog, CalendarCheck, Building2,
   Bot, ClipboardList, BarChart3, Hospital, Settings, LogOut,
   ChevronLeft, ChevronRight, Stethoscope, FileText, BellRing,
-  UserCircle, ClipboardPlus, Layers, CreditCard, BedDouble, TrendingUp,
+  UserCircle, ClipboardPlus, Layers, CreditCard, BedDouble, TrendingUp, Activity,
 } from 'lucide-react';
 
 interface MenuItem {
@@ -39,6 +39,20 @@ const Sidebar: React.FC = () => {
 
   const aiModuleItems: MenuItem[] = [
     { label: 'Overview', icon: Layers, path: '/admin/overview' },
+    {
+      label: 'Radiology Triage',
+      icon: Activity,
+      path: '/admin/radiology',
+      children: [
+        { label: 'Dashboard', path: '/admin/radiology' },
+        { label: 'AI Triage Worklist', path: '/admin/radiology/worklist' },
+        { label: 'Analyze X-Ray', path: '/admin/radiology/analyze' },
+        { label: 'Model Performance', path: '/admin/radiology/performance' },
+        { label: 'Databricks Pipeline', path: '/admin/radiology/pipeline' },
+        { label: 'Architecture', path: '/admin/radiology/architecture' },
+        { label: 'About PoC', path: '/admin/radiology/about' },
+      ],
+    },
     {
       label: 'Revenue Cycle',
       icon: CreditCard,

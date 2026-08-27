@@ -421,6 +421,204 @@ def beds_dashboard():
     }
 
 
+# ─── Radiology Endpoints ──────────────────────────────────────────────────────
+
+# In-memory store fallback for radiology demo when DB isn't updated
+RADIOLOGY_MOCK_DATA = [
+    {
+        "id": "CXR-2026-017",
+        "patientId": "PT-9821",
+        "modality": "CR",
+        "bodyPart": "CHEST",
+        "studyTime": "08:14:22",
+        "studyDate": "2026-08-27",
+        "aiFinding": "Possible Pneumothorax",
+        "confidenceScore": 94,
+        "priority": "CRITICAL",
+        "aiStatus": "Completed",
+        "modelVersion": "chest-xray-triage-v1",
+        "inferenceTimeSeconds": 1.8,
+        "probabilities": {"pneumothorax": 94, "pneumonia": 12, "pleuralEffusion": 8, "noUrgentFinding": 4},
+        "heatmapRegion": {"x": 72, "y": 35, "radius": 22, "label": "Right Pleural Air Space / Visceral Line"},
+        "feedback": {"status": "Unreviewed"},
+        "patientAge": 48,
+        "patientGender": "M",
+        "referringPhysician": "Dr. S. Ramanathan (Emergency Medicine)",
+    },
+    {
+        "id": "CXR-2026-011",
+        "patientId": "PT-9043",
+        "modality": "CR",
+        "bodyPart": "CHEST",
+        "studyTime": "08:42:05",
+        "studyDate": "2026-08-27",
+        "aiFinding": "Possible Pneumonia",
+        "confidenceScore": 87,
+        "priority": "HIGH",
+        "aiStatus": "Completed",
+        "modelVersion": "chest-xray-triage-v1",
+        "inferenceTimeSeconds": 1.6,
+        "probabilities": {"pneumothorax": 5, "pneumonia": 87, "pleuralEffusion": 42, "noUrgentFinding": 9},
+        "heatmapRegion": {"x": 32, "y": 58, "radius": 26, "label": "Right Lower Lobe Consolidation"},
+        "feedback": {"status": "Agree", "comments": "Concur with AI finding. Right lower lobe opacity consistent with acute consolidation.", "reviewedBy": "Dr. V. Kapoor (Radiology)", "reviewedAt": "2026-08-27 09:15"},
+        "patientAge": 62,
+        "patientGender": "F",
+        "referringPhysician": "Dr. A. Sundaram (Pulmonology)",
+    },
+    {
+        "id": "CXR-2026-009",
+        "patientId": "PT-8712",
+        "modality": "DX",
+        "bodyPart": "CHEST",
+        "studyTime": "09:05:18",
+        "studyDate": "2026-08-27",
+        "aiFinding": "Possible Pleural Effusion",
+        "confidenceScore": 82,
+        "priority": "HIGH",
+        "aiStatus": "Completed",
+        "modelVersion": "chest-xray-triage-v1",
+        "inferenceTimeSeconds": 1.9,
+        "probabilities": {"pneumothorax": 8, "pneumonia": 34, "pleuralEffusion": 82, "noUrgentFinding": 14},
+        "heatmapRegion": {"x": 28, "y": 72, "radius": 24, "label": "Left Costophrenic Angle Blunting"},
+        "feedback": {"status": "Unreviewed"},
+        "patientAge": 55,
+        "patientGender": "M",
+        "referringPhysician": "Dr. M. Joseph (General Medicine)",
+    },
+    {
+        "id": "CXR-2026-021",
+        "patientId": "PT-9988",
+        "modality": "CR",
+        "bodyPart": "CHEST",
+        "studyTime": "10:30:15",
+        "studyDate": "2026-08-27",
+        "aiFinding": "No Urgent Finding",
+        "confidenceScore": 91,
+        "priority": "ROUTINE",
+        "aiStatus": "Completed",
+        "modelVersion": "chest-xray-triage-v1",
+        "inferenceTimeSeconds": 1.5,
+        "probabilities": {"pneumothorax": 2, "pneumonia": 5, "pleuralEffusion": 3, "noUrgentFinding": 91},
+        "feedback": {"status": "Unreviewed"},
+        "patientAge": 42,
+        "patientGender": "F",
+        "referringPhysician": "Dr. P. Nair (Occupational Health)",
+    },
+]
+
+
+@app.get("/api/radiology/dashboard")
+def get_radiology_dashboard():
+    total = len(RADIOLOGY_MOCK_DATA)
+    critical = sum(1 for s in RADIOLOGY_MOCK_DATA if s["priority"] == "CRITICAL")
+    high = sum(1 for s in RADIOLOGY_MOCK_DATA if s["priority"] == "HIGH")
+    routine = sum(1 for s in RADIOLOGY_MOCK_DATA if s["priority"] == "ROUTINE")
+    awaiting = sum(1 for s in RADIOLOGY_MOCK_DATA if s["aiStatus"] in ["Processing", "Awaiting Analysis"])
+    return {
+        "totalStudies": total,
+        "critical": critical,
+        "high": high,
+        "routine": routine,
+        "awaitingAnalysis": awaiting,
+        "agreementRate": 94,
+    }
+
+
+@app.get("/api/radiology/studies")
+def get_radiology_studies(
+    priority: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+):
+    res = list(RADIOLOGY_MOCK_DATA)
+    if priority and priority != "All":
+        if priority == "Awaiting Analysis":
+            res = [s for s in res if s["aiStatus"] in ["Processing", "Awaiting Analysis"]]
+        else:
+            res = [s for s in res if s["priority"] == priority]
+    if search:
+        q = search.lower()
+        res = [s for s in res if q in s["id"].lower() or q in s["patientId"].lower() or q in s["aiFinding"].lower()]
+
+    rank = {"CRITICAL": 1, "HIGH": 2, "ROUTINE": 3, "PROCESSING": 4}
+    res.sort(key=lambda s: (rank.get(s["priority"], 5), s["studyTime"]))
+    return res
+
+
+@app.get("/api/radiology/studies/{study_id}")
+def get_radiology_study(study_id: str):
+    for s in RADIOLOGY_MOCK_DATA:
+        if s["id"].lower() == study_id.lower():
+            return s
+    raise HTTPException(status_code=404, detail="Study not found")
+
+
+@app.post("/api/radiology/analyze")
+def analyze_radiology_study(payload: dict):
+    study_id = payload.get("studyId") or f"CXR-2026-{len(RADIOLOGY_MOCK_DATA)+10:03d}"
+    now = datetime.now()
+    new_study = {
+        "id": study_id,
+        "patientId": f"PT-{random.randint(1000, 9999)}",
+        "modality": payload.get("modality", "CR"),
+        "bodyPart": payload.get("bodyPart", "CHEST"),
+        "studyTime": now.strftime("%H:%M:%S"),
+        "studyDate": now.strftime("%Y-%m-%d"),
+        "aiFinding": "Possible Pneumothorax",
+        "confidenceScore": 94,
+        "priority": "CRITICAL",
+        "aiStatus": "Completed",
+        "modelVersion": "chest-xray-triage-v1",
+        "inferenceTimeSeconds": 1.8,
+        "probabilities": {"pneumothorax": 94, "pneumonia": 12, "pleuralEffusion": 8, "noUrgentFinding": 4},
+        "heatmapRegion": {"x": 72, "y": 35, "radius": 22, "label": "Right Pleural Air Space"},
+        "feedback": {"status": "Unreviewed"},
+        "patientAge": 45,
+        "patientGender": "M",
+        "referringPhysician": "Dr. S. Ramanathan (Emergency Medicine)",
+    }
+    RADIOLOGY_MOCK_DATA.insert(0, new_study)
+    return new_study
+
+
+@app.post("/api/radiology/studies/{study_id}/feedback")
+def submit_radiology_feedback(study_id: str, payload: dict):
+    for s in RADIOLOGY_MOCK_DATA:
+        if s["id"].lower() == study_id.lower():
+            s["feedback"] = {
+                "status": payload.get("status", "Agree"),
+                "comments": payload.get("comments"),
+                "reviewedBy": "Dr. V. Kapoor (Radiology)",
+                "reviewedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            }
+            return s
+    raise HTTPException(status_code=404, detail="Study not found")
+
+
+@app.get("/api/radiology/performance")
+def get_radiology_performance():
+    return [
+        {
+            "finding": "Pneumothorax",
+            "sensitivity": 0.942, "specificity": 0.985, "precision": 0.915, "recall": 0.942,
+            "f1Score": 0.928, "auroc": 0.978, "sampleCount": 450, "truePositives": 98,
+            "falsePositives": 9, "falseNegatives": 6, "trueNegatives": 337,
+        },
+        {
+            "finding": "Pneumonia / Lung Opacity",
+            "sensitivity": 0.895, "specificity": 0.941, "precision": 0.868, "recall": 0.895,
+            "f1Score": 0.881, "auroc": 0.952, "sampleCount": 620, "truePositives": 170,
+            "falsePositives": 26, "falseNegatives": 20, "trueNegatives": 404,
+        },
+        {
+            "finding": "Pleural Effusion",
+            "sensitivity": 0.918, "specificity": 0.963, "precision": 0.892, "recall": 0.918,
+            "f1Score": 0.905, "auroc": 0.966, "sampleCount": 510, "truePositives": 124,
+            "falsePositives": 15, "falseNegatives": 11, "trueNegatives": 360,
+        },
+    ]
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "Meridian AI RCM & Bed Allocation API"}
+    return {"status": "ok", "service": "Meridian AI RCM, Bed Allocation & Radiology API"}
+
