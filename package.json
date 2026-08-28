@@ -1,0 +1,15 @@
+{
+  "name": "meridian-healthcare-prototype",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Meridian Hospital AI Revenue Cycle, Predictive Bed Allocation & Radiology Triage Assistant POC",
+  "scripts": {
+    "start": "concurrently -n \"BACKEND,FRONTEND\" -c \"yellow,cyan\" \"npm run backend\" \"npm run frontend\"",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"yellow,cyan\" \"npm run backend\" \"npm run frontend\"",
+    "frontend": "cd frontend && npm run dev",
+    "backend": "cd backend && uvicorn main:app --reload --port 8000"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -29,6 +29,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import api.agent_routes as agent_routes
+app.include_router(agent_routes.router)
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from appointment_service import (
+    AppointmentError, EntityNotFoundError, DoctorInactiveError,
+    InvalidScheduleError, PastDateError, SlotUnavailableError,
+    InvalidStatusTransitionError
+)
+
+@app.exception_handler(EntityNotFoundError)
+def entity_not_found_handler(request: Request, exc: EntityNotFoundError):
+    return JSONResponse(
+        status_code=404,
+        content={"success": False, "error_code": exc.error_code, "message": exc.message}
+    )
+
+@app.exception_handler(AppointmentError)
+def appointment_error_handler(request: Request, exc: AppointmentError):
+    return JSONResponse(
+        status_code=400,
+        content={"success": False, "error_code": exc.error_code, "message": exc.message}
+    )
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -621,4 +647,95 @@ def get_radiology_performance():
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "Meridian AI RCM, Bed Allocation & Radiology API"}
+
+
+# ─── Appointment Service Endpoints ──────────────────────────────────────────
+
+class BookAppointmentRequest(BaseModel):
+    patient_id: int
+    doctor_id: int
+    department_id: int
+    appointment_date: str
+    appointment_time: str
+    patient_reason: Optional[str] = None
+    booking_source: Optional[str] = "ADMIN"
+    created_by_user_id: Optional[int] = None
+
+class CancelAppointmentRequest(BaseModel):
+    reason: str
+    cancelled_by_user_id: Optional[int] = None
+
+class RescheduleAppointmentRequest(BaseModel):
+    new_date: str
+    new_time: str
+    reason: str
+    rescheduled_by_user_id: Optional[int] = None
+
+
+@app.get("/api/doctors/{doctor_id}/availability")
+def api_get_doctor_availability(doctor_id: int, date: str = Query(..., description="Date in YYYY-MM-DD format")):
+    import appointment_service
+    res = appointment_service.get_doctor_availability(doctor_id, date)
+    return res
+
+
+@app.get("/api/doctors/{doctor_id}/slots")
+def api_get_available_slots(doctor_id: int, date: str = Query(..., description="Date in YYYY-MM-DD format")):
+    import appointment_service
+    slots = appointment_service.get_available_slots(doctor_id, date)
+    return slots
+
+
+@app.post("/api/appointments", status_code=201)
+def api_book_appointment(payload: BookAppointmentRequest):
+    import appointment_service
+    res = appointment_service.book_appointment(
+        patient_id=payload.patient_id,
+        doctor_id=payload.doctor_id,
+        department_id=payload.department_id,
+        date_str=payload.appointment_date,
+        time_str=payload.appointment_time,
+        patient_reason=payload.patient_reason,
+        booking_source=payload.booking_source,
+        created_by_user_id=payload.created_by_user_id
+    )
+    return res
+
+
+@app.get("/api/appointments/{booking_id}")
+def api_get_appointment(booking_id: str, patient_id: Optional[int] = Query(None)):
+    import appointment_service
+    res = appointment_service.get_appointment(booking_id, patient_id)
+    return res
+
+
+@app.get("/api/patients/{patient_id}/appointments")
+def api_get_patient_appointments(patient_id: int):
+    import appointment_service
+    res = appointment_service.get_patient_appointments(patient_id)
+    return res
+
+
+@app.post("/api/appointments/{booking_id}/cancel")
+def api_cancel_appointment(booking_id: str, payload: CancelAppointmentRequest):
+    import appointment_service
+    res = appointment_service.cancel_appointment(
+        booking_id=booking_id,
+        reason=payload.reason,
+        cancelled_by_user_id=payload.cancelled_by_user_id
+    )
+    return res
+
+
+@app.post("/api/appointments/{booking_id}/reschedule")
+def api_reschedule_appointment(booking_id: str, payload: RescheduleAppointmentRequest):
+    import appointment_service
+    res = appointment_service.reschedule_appointment(
+        booking_id=booking_id,
+        new_date_str=payload.new_date,
+        new_time_str=payload.new_time,
+        reason=payload.reason,
+        rescheduled_by_user_id=payload.rescheduled_by_user_id
+    )
+    return res
 

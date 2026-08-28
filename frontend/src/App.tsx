@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { RoleProvider } from './context/RoleContext';
 import LoginPage from './pages/LoginPage';
 import AppLayout from './components/AppLayout';
+import PatientChat from './pages/PatientChat';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -72,6 +73,7 @@ const AppRoutes: React.FC = () => {
     <Routes>
       {/* Public */}
       <Route path="/login" element={isAuthenticated ? <Navigate to={user?.role === 'admin' ? '/admin/dashboard' : '/doctor/dashboard'} replace /> : <LoginPage />} />
+      <Route path="/patient-chat" element={<PatientChat />} />
 
       {/* Admin Routes */}
       <Route path="/admin" element={<ProtectedRoute role="admin"><AppLayout /></ProtectedRoute>}>

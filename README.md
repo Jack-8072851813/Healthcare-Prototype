@@ -8,48 +8,43 @@ A working proof-of-concept prototype demonstrating:
 
 ---
 
-## Quick Start
+## Quick Start (Single Command)
 
-### Frontend (runs standalone — no backend needed)
+To run **both Frontend and Backend together in a single command**:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Navigate to project root directory
+cd Healthcare-Prototype
+
+# Run both Frontend and Backend concurrently
+npm start
 ```
 
-Opens at: http://localhost:5173
-
-**Login credentials:**
-| Role | Username | Password |
-|------|----------|----------|
-| Admin | `admin` | `admin` |
-| Doctor | `doc1` | `doc1` |
-
-After login as `admin`, navigate to:
-- **AI Module Overview** → full combined summary
-- **Revenue Cycle** → RCM dashboard, Claims list, Claim detail
-- **Bed Allocation** → Bed dashboard, Forecast
+*Or on Windows, simply double-click **`start.bat`**.*
 
 ---
 
-### Backend (optional — frontend falls back to mock data automatically)
+### Alternative: Individual Service Execution
+
+#### Frontend Only (Runs standalone with mock data)
+
+```bash
+cd frontend
+npm run dev
+```
+
+Opens at: http://localhost:5173 (or 5174)
+
+#### Backend Only
 
 ```bash
 cd backend
-
-# 1. Create virtual environment
 python -m venv venv
 venv\Scripts\activate          # Windows
 # source venv/bin/activate     # macOS/Linux
 
-# 2. Install dependencies
 pip install -r requirements.txt
-
-# 3. Seed the database (generates hospital.db)
 python seed_data.py
-
-# 4. Start the API server
 uvicorn main:app --reload
 ```
 

@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS departments (
+    id BIGSERIAL PRIMARY KEY,
+    department_code VARCHAR(20) NOT NULL UNIQUE,
+    department_name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_departments_code ON departments(department_code);

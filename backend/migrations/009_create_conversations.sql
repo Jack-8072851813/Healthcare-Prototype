@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS conversations (
+    id BIGSERIAL PRIMARY KEY,
+    conversation_code VARCHAR(50) NOT NULL UNIQUE,
+    patient_id BIGINT REFERENCES patients(id) ON DELETE SET NULL,
+    whatsapp_number VARCHAR(20) NOT NULL,
+    channel VARCHAR(20) NOT NULL DEFAULT 'WHATSAPP' CHECK (channel IN ('WHATSAPP')),
+    language VARCHAR(20) NOT NULL CHECK (language IN ('ENGLISH', 'TAMIL', 'HINDI', 'TELUGU', 'MALAYALAM', 'KANNADA', 'URDU')),
+    current_intent VARCHAR(50) CHECK (current_intent IN ('GREETING', 'BOOK_APPOINTMENT', 'CANCEL_APPOINTMENT', 'RESCHEDULE_APPOINTMENT', 'APPOINTMENT_STATUS', 'DOCTOR_AVAILABILITY', 'HOSPITAL_INFORMATION', 'DEPARTMENT_INFORMATION', 'SYMPTOM_GUIDANCE', 'PRE_ADMISSION', 'HUMAN_ESCALATION')),
+    conversation_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (conversation_status IN ('ACTIVE', 'COMPLETED', 'ESCALATED')),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    ended_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_patient_id ON conversations(patient_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_whatsapp ON conversations(whatsapp_number);
+CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(conversation_status);
+CREATE INDEX IF NOT EXISTS idx_conversations_last_msg ON conversations(last_message_at);
