@@ -8,27 +8,15 @@ const pageTitles: Record<string, string> = {
   '/admin/dashboard': 'Administration Dashboard',
   '/admin/patients': 'Patient Management',
   '/admin/doctors': 'Doctor Management',
+  '/admin/schedules': 'Doctor Schedules & Timings',
   '/admin/appointments': 'Appointment Management',
   '/admin/departments': 'Departments & Specialties',
   '/admin/ai-desk': 'Meridian AI Patient Desk',
+  '/admin/escalations': 'Human Escalation Management',
   '/admin/pre-admission': 'Pre-Admission Follow-up',
   '/admin/reports': 'Hospital Reports',
   '/admin/hospital-info': 'Hospital Information',
   '/admin/settings': 'Settings',
-  // AI Modules
-  '/admin/overview': 'AI Module Overview',
-  '/admin/revenue-cycle': 'Revenue Cycle Management',
-  '/admin/revenue-cycle/claims': 'Claims Management',
-  '/admin/bed-allocation': 'Predictive Bed Allocation',
-  '/admin/bed-allocation/forecast': 'Bed Demand Forecast',
-  // AI Radiology Triage Assistant
-  '/admin/radiology': 'Meridian AI Radiology Triage Assistant',
-  '/admin/radiology/worklist': 'AI Triage Radiology Worklist',
-  '/admin/radiology/analyze': 'Analyze New Chest X-Ray',
-  '/admin/radiology/performance': 'AI Model Performance Metrics',
-  '/admin/radiology/pipeline': 'Databricks AI Pipeline Architecture',
-  '/admin/radiology/architecture': 'System Architecture Overview',
-  '/admin/radiology/about': 'About Radiology Triage PoC',
   // Doctor
   '/doctor/dashboard': 'Doctor Dashboard',
   '/doctor/my-patients': 'My Patients',
@@ -48,10 +36,8 @@ const AppLayout: React.FC = () => {
     // Exact match first
     if (pageTitles[location.pathname]) return pageTitles[location.pathname];
     // Dynamic route matching
-    if (location.pathname.match(/\/admin\/radiology\/studies\/CXR/)) return 'Chest X-Ray Study Detail';
-    if (location.pathname.match(/\/admin\/revenue-cycle\/claims\/CLM/)) return 'Claim Detail';
-    if (location.pathname.match(/\/admin\/patients\/P/)) return 'Patient Profile';
-    if (location.pathname.match(/\/doctor\/patient-records\//)) return 'Patient Records';
+    if (location.pathname.match(/\/admin\/patients\/\d+/)) return 'Patient Profile';
+    if (location.pathname.match(/\/doctor\/patient-records\/\d+/)) return 'Patient Profile';
     // Prefix match
     const match = Object.keys(pageTitles).find(k => location.pathname.startsWith(k));
     return match ? pageTitles[match] : 'Meridian Hospital';
@@ -65,7 +51,7 @@ const AppLayout: React.FC = () => {
         <main className="main-content">
           <Outlet />
           <footer className="app-footer">
-            Meridian Hospital | Kolathur, Chennai | AI RCM & Bed Allocation POC — Demo Environment
+            Meridian Hospital | Kolathur, Chennai — AI Conversational Patient Desk
           </footer>
         </main>
       </div>

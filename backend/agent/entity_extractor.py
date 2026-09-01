@@ -106,6 +106,17 @@ def parse_natural_time(text_lower: str) -> str:
             
     return None
 
+
+def is_date_or_time_expression(text: str) -> bool:
+    """Returns True if the text represents a date or time expression."""
+    if not text:
+        return False
+    text_lower = text.lower().strip()
+    if parse_natural_date(text_lower) is not None or parse_natural_time(text_lower) is not None:
+        return True
+    time_indicators = ["today", "tomorrow", "morning", "afternoon", "evening", "am", "pm", "clock", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    return any(w in text_lower for w in time_indicators)
+
 def extract_entities(text: str) -> dict:
     """
     Scans user text and resolves entities dynamically against the database:

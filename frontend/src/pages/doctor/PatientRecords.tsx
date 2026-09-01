@@ -1,72 +1,116 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { patients } from '../../data/patients';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Search } from 'lucide-react';
-import { useState } from 'react';
+import { fetchPatients, type Patient } from '../../services/dashboardApi';
+import { Eye, Search, RefreshCw } from 'lucide-react';
 
 const PatientRecords: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [patients, setPatients] = useState<Patient[]>([]);
   const [search, setSearch] = useState('');
-  const myPatients = patients.filter(p => p.assignedDoctorId === user?.loginId);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const filtered = myPatients.filter(p => !search ||
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.id.toLowerCase().includes(search.toLowerCase())
-  );
+  const loadPatients = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetchPatients({ search: search || undefined, per_page: 100 });
+      setPatients(res.patients);
+    } catch {
+      setError('Failed to load patient records.');
+    } finally {
+      setLoading(false);
+    }
+  }, [search]);
+
+  useEffect(() => {
+    const timer = setTimeout(loadPatients, 300);
+    return () => clearTimeout(timer);
+  }, [loadPatients]);
+
+  const calcAge = (dob: string) => {
+    if (!dob) return '—';
+    return Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000));
+  };
 
   return (
     <div>
       <div className="page-header">
         <h2>Patient Records</h2>
-        <p>View detailed records for your patients</p>
-        <span className="demo-badge">⚠️ DEMO DATA — Fictional Patient Records</span>
+        <p>View detailed records for your patients — {user?.name}</p>
       </div>
+
+      {error && <div className="error-alert" style={{ marginBottom: 16 }}>⚠️ {error}</div>}
 
       <div className="card">
         <div className="card-header">
           <div className="search-bar" style={{ maxWidth: 320 }}>
             <Search size={18} />
-            <input placeholder="Search patient records..." value={search} onChange={e => setSearch(e.target.value)} />
+            <input
+              placeholder="Search patient records..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
           </div>
+          <button className="btn btn-secondary btn-sm" onClick={loadPatients} disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            Refresh
+          </button>
         </div>
         <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Patient ID</th><th>Name</th><th>Age</th><th>Gender</th>
-                <th>Blood Group</th><th>Medical History</th><th>Last Visit</th><th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.id}</td>
-                  <td style={{ fontWeight: 500 }}>{p.name}</td>
-                  <td>{p.age}</td>
-                  <td>{p.gender}</td>
-                  <td>{p.bloodGroup}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {p.medicalHistory.slice(0, 2).map(m => (
-                        <span key={m} className="intent-badge" style={{ fontSize: 10 }}>{m}</span>
-                      ))}
-                      {p.medicalHistory.length > 2 && (
-                        <span className="intent-badge" style={{ fontSize: 10 }}>+{p.medicalHistory.length - 2}</span>
-                      )}
-                    </div>
-                  </td>
-                  <td>{p.lastVisit}</td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/doctor/patient-records/${p.id}`)}>
-                      <Eye size={14} /> View Record
-                    </button>
-                  </td>
+          {loading ? (
+            <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Loading records...</div>
+          ) : patients.length === 0 ? (
+            <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+              {search ? 'No records match your search.' : 'No patient records found.'}
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Patient ID</th>
+                  <th>Name</th>
+                  <th>Age</th>
+                  <th>Gender</th>
+                  <th>Blood Group</th>
+                  <th>Phone</th>
+                  <th>City</th>
+                  <th>Registered</th>
+                  <th>Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {patients.map(p => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.patient_code}</td>
+                    <td style={{ fontWeight: 500 }}>{p.first_name} {p.last_name}</td>
+                    <td>{calcAge(p.date_of_birth)}</td>
+                    <td>{p.gender}</td>
+                    <td>
+                      {p.blood_group
+                        ? <span className="intent-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{p.blood_group}</span>
+                        : '—'}
+                    </td>
+                    <td style={{ fontSize: 12 }}>{p.phone}</td>
+                    <td>{p.city || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}</td>
+                    <td>
+                      <button className="btn btn-secondary btn-sm"
+                        onClick={() => navigate(`/doctor/patient-records/${p.id}`)}>
+                        <Eye size={14} /> View Record
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div style={{ padding: '12px 22px', fontSize: 13, color: 'var(--text-muted)' }}>
+          {loading ? 'Loading...' : `${patients.length} record(s) shown`}
         </div>
       </div>
     </div>

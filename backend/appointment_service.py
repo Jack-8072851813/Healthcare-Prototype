@@ -44,14 +44,14 @@ def validate_patient(cur, patient_id):
 
 def validate_doctor(cur, doctor_id):
     """Checks if the doctor exists and is active."""
-    cur.execute("SELECT first_name, last_name, display_name, department_id, status FROM doctors WHERE id = %s;", (doctor_id,))
+    cur.execute("SELECT first_name, last_name, display_name, department_id, status, email, phone FROM doctors WHERE id = %s;", (doctor_id,))
     row = cur.fetchone()
     if not row:
         raise EntityNotFoundError(f"Doctor with ID {doctor_id} does not exist.", "DOCTOR_NOT_FOUND")
-    first_name, last_name, display_name, department_id, status = row
+    first_name, last_name, display_name, department_id, status, email, phone = row
     if status != 'ACTIVE':
         raise DoctorInactiveError(f"Doctor with ID {doctor_id} is currently not active.", "DOCTOR_INACTIVE")
-    return {"name": display_name, "department_id": department_id}
+    return {"name": display_name, "department_id": department_id, "email": email, "phone": phone}
 
 def validate_department(cur, department_id):
     """Checks if the department exists and is active."""
@@ -116,9 +116,11 @@ def get_doctor_availability(doctor_id, date_str):
         doc_info = validate_doctor(cur, doctor_id)
         
         # Parse date
+        if not date_str or not isinstance(date_str, str):
+            raise AppointmentError("Appointment date is required (YYYY-MM-DD).", "INVALID_DATE_FORMAT")
         try:
-            date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
+            date_obj = datetime.datetime.strptime(date_str.strip(), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
             raise AppointmentError("Invalid date format. Use YYYY-MM-DD.", "INVALID_DATE_FORMAT")
             
         schedule = get_doctor_schedule_for_date(cur, doctor_id, date_obj)
@@ -148,10 +150,12 @@ def get_available_slots(doctor_id, date_str):
         validate_doctor(cur, doctor_id)
         
         # Parse date
+        if not date_str or not isinstance(date_str, str):
+            return []
         try:
-            date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
-            raise AppointmentError("Invalid date format. Use YYYY-MM-DD.", "INVALID_DATE_FORMAT")
+            date_obj = datetime.datetime.strptime(date_str.strip(), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            return []
             
         schedule = get_doctor_schedule_for_date(cur, doctor_id, date_obj)
         if not schedule:
@@ -218,17 +222,22 @@ def book_appointment(patient_id, doctor_id, department_id, date_str, time_str, p
                 raise EntityNotFoundError(f"User with ID {created_by_user_id} does not exist or is inactive.", "USER_NOT_FOUND")
             
         # Parse inputs
+        if not date_str or not isinstance(date_str, str):
+            raise AppointmentError("Appointment date is required (YYYY-MM-DD).", "INVALID_DATE_FORMAT")
+        if not time_str or not isinstance(time_str, str):
+            raise AppointmentError("Appointment time is required (HH:MM).", "INVALID_TIME_FORMAT")
+
         try:
-            date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
+            date_obj = datetime.datetime.strptime(date_str.strip(), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
             raise AppointmentError("Invalid date format. Use YYYY-MM-DD.", "INVALID_DATE_FORMAT")
         try:
-            # Parse support for HH:MM and HH:MM:SS
-            if len(time_str) == 5:
-                time_obj = datetime.datetime.strptime(time_str, "%H:%M").time()
+            clean_t = time_str.strip()
+            if len(clean_t) == 5:
+                time_obj = datetime.datetime.strptime(clean_t, "%H:%M").time()
             else:
-                time_obj = datetime.datetime.strptime(time_str, "%H:%M:%S").time()
-        except ValueError:
+                time_obj = datetime.datetime.strptime(clean_t, "%H:%M:%S").time()
+        except (ValueError, TypeError):
             raise AppointmentError("Invalid time format. Use HH:MM.", "INVALID_TIME_FORMAT")
             
         # Past check
@@ -257,14 +266,16 @@ def book_appointment(patient_id, doctor_id, department_id, date_str, time_str, p
             
         # 4. Generate unique ID and insert
         booking_id = generate_booking_id(cur)
+        status_val = "CONFIRMED"
+        print(f"[BOOKING_TRANSACTION] Inserting appointment into PostgreSQL: booking_id={booking_id}, patient_id={patient_id}, doctor_id={doctor_id}, department_id={department_id}, date={date_obj}, time={time_obj}, status={status_val}, source={booking_source}")
         cur.execute("""
             INSERT INTO appointments (
                 booking_id, patient_id, doctor_id, department_id, 
                 appointment_date, appointment_time, status, booking_source, 
                 patient_reason, created_by_user_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, 'BOOKED', %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
-        """, (booking_id, patient_id, doctor_id, department_id, date_obj, time_obj, booking_source, patient_reason, created_by_user_id))
+        """, (booking_id, patient_id, doctor_id, department_id, date_obj, time_obj, status_val, booking_source, patient_reason, created_by_user_id))
         appt_id = cur.fetchone()[0]
         
         # 5. Audit Logging (if booked by Admin/Doctor)
@@ -275,7 +286,7 @@ def book_appointment(patient_id, doctor_id, department_id, date_str, time_str, p
                 "doctor_id": doctor_id,
                 "appointment_date": str(date_obj),
                 "appointment_time": time_obj.strftime("%H:%M"),
-                "status": "BOOKED"
+                "status": status_val
             }
             cur.execute("""
                 INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values, reason)
@@ -291,12 +302,35 @@ def book_appointment(patient_id, doctor_id, department_id, date_str, time_str, p
         
         # Commit transaction
         conn.commit()
+        print(f"[BOOKING_TRANSACTION] Successfully committed appointment ID {appt_id} (Booking ID: {booking_id}) to PostgreSQL database.")
+
+        # Dispatch email alert to doctor asynchronously in background thread
+        def _send_async_doctor_email():
+            try:
+                from utils.email_service import send_appointment_notification_email
+                doc_email = doc_info.get("email")
+                if doc_email:
+                    send_appointment_notification_email(
+                        doctor_email=doc_email,
+                        doctor_name=doc_info["name"],
+                        patient_name=pat_info["name"],
+                        patient_phone=pat_info.get("phone", ""),
+                        appointment_date=str(date_obj),
+                        appointment_time=time_obj.strftime("%I:%M %p"),
+                        department_name=dept_name,
+                        booking_id=booking_id
+                    )
+            except Exception as email_err:
+                print(f"[WARNING] Could not dispatch doctor notification email: {email_err}")
+
+        import threading
+        threading.Thread(target=_send_async_doctor_email, daemon=True).start()
         
         return {
             "success": True,
             "booking_id": booking_id,
             "appointment_id": appt_id,
-            "status": "BOOKED",
+            "status": status_val,
             "doctor": doc_info["name"],
             "department": dept_name,
             "appointment_date": str(date_obj),
@@ -525,16 +559,22 @@ def reschedule_appointment(booking_id, new_date_str, new_time_str, reason, resch
             raise InvalidStatusTransitionError("Completed appointments cannot be rescheduled.", "APPOINTMENT_COMPLETED_CANNOT_RESCHEDULE")
             
         # Parse inputs
+        if not new_date_str or not isinstance(new_date_str, str):
+            raise AppointmentError("New appointment date is required (YYYY-MM-DD).", "INVALID_DATE_FORMAT")
+        if not new_time_str or not isinstance(new_time_str, str):
+            raise AppointmentError("New appointment time is required (HH:MM).", "INVALID_TIME_FORMAT")
+
         try:
-            new_date_obj = datetime.datetime.strptime(new_date_str, "%Y-%m-%d").date()
-        except ValueError:
+            new_date_obj = datetime.datetime.strptime(new_date_str.strip(), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
             raise AppointmentError("Invalid date format. Use YYYY-MM-DD.", "INVALID_DATE_FORMAT")
         try:
-            if len(new_time_str) == 5:
-                new_time_obj = datetime.datetime.strptime(new_time_str, "%H:%M").time()
+            clean_t = new_time_str.strip()
+            if len(clean_t) == 5:
+                new_time_obj = datetime.datetime.strptime(clean_t, "%H:%M").time()
             else:
-                new_time_obj = datetime.datetime.strptime(new_time_str, "%H:%M:%S").time()
-        except ValueError:
+                new_time_obj = datetime.datetime.strptime(clean_t, "%H:%M:%S").time()
+        except (ValueError, TypeError):
             raise AppointmentError("Invalid time format. Use HH:MM.", "INVALID_TIME_FORMAT")
             
         # Past check

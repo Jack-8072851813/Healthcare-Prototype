@@ -1,71 +1,131 @@
-import React, { useState } from 'react';
-import { aiConversations } from '../../data/aiConversations';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Bot, CalendarCheck, CheckCircle, AlertTriangle, Globe, MessageSquare,
-  Mic, ChevronDown, ArrowDown, Phone, Volume2
+  RefreshCw, ChevronLeft, ChevronRight, Eye, X
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Cell
+} from 'recharts';
+import {
+  fetchConversations, fetchIntentBreakdown, fetchConversationMessages,
+  type Conversation,
+} from '../../services/dashboardApi';
+
+const INTENT_COLORS: Record<string, string> = {
+  GREETING: '#48BB78',
+  BOOK_APPOINTMENT: '#4A90D9',
+  CANCEL_APPOINTMENT: '#F56565',
+  RESCHEDULE_APPOINTMENT: '#ECC94B',
+  DOCTOR_AVAILABILITY: '#9F7AEA',
+  HOSPITAL_INFORMATION: '#5AAFA5',
+  DEPARTMENT_INFORMATION: '#ED8936',
+  SYMPTOM_GUIDANCE: '#E53E3E',
+  PRE_ADMISSION: '#38B2AC',
+  HUMAN_ESCALATION: '#FC8181',
+  LANGUAGE_CHANGE: '#B794F4',
+  EMERGENCY_GUIDANCE: '#C53030',
+};
+
+const CHART_COLORS = ['#4A90D9', '#5AAFA5', '#48BB78', '#ECC94B', '#F56565', '#9F7AEA', '#ED8936', '#38B2AC'];
+
+const LANGUAGES = ['ENGLISH', 'TAMIL', 'HINDI', 'TELUGU', 'MALAYALAM', 'KANNADA', 'URDU'];
 
 const AIPatientDesk: React.FC = () => {
-  const [selectedConv, setSelectedConv] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'conversations' | 'architecture' | 'voice'>('conversations');
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [intentBreakdown, setIntentBreakdown] = useState<{ intent: string; count: number }[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [langFilter, setLangFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
+  const [convMessages, setConvMessages] = useState<unknown[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
-  const conv = selectedConv ? aiConversations.find(c => c.id === selectedConv) : null;
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [convRes, ibRes] = await Promise.all([
+        fetchConversations({ status: statusFilter || undefined, language: langFilter || undefined, page, per_page: 15 }),
+        fetchIntentBreakdown(30),
+      ]);
+      setConversations(convRes.conversations);
+      setTotal(convRes.total);
+      setTotalPages(convRes.total_pages);
+      setIntentBreakdown(ibRes.intent_breakdown);
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter, langFilter, page]);
 
-  const intents = [
-    'Appointment Booking', 'Appointment Rescheduling', 'Appointment Cancellation',
-    'Doctor Availability', 'Department Information', 'Hospital Information',
-    'OPD Timings', 'Pre-Admission Follow-up', 'Appointment Status', 'Human Staff Escalation'
-  ];
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const openConversation = async (conv: Conversation) => {
+    setSelectedConv(conv);
+    setLoadingMessages(true);
+    const res = await fetchConversationMessages(conv.id);
+    setConvMessages(res?.messages ?? []);
+    setLoadingMessages(false);
+  };
+
+  // Compute summary stats from conversations
+  const totalConvs = total;
+  const escalated = conversations.filter(c => c.conversation_status === 'ESCALATED').length;
 
   return (
     <div>
       <div className="page-header">
-        <h2>Meridian AI Patient Desk</h2>
-        <p>AI-powered conversational assistance for patients</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h2>Meridian AI Patient Desk</h2>
+            <p>AI-powered conversational assistance — live data from database</p>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={loadData} disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
       <div className="kpi-grid">
         <div className="kpi-card">
-          <div className="kpi-card-header">
-            <div className="kpi-icon teal"><Bot size={22} /></div>
-          </div>
-          <div className="kpi-value">143</div>
-          <div className="kpi-label">AI Conversations Today</div>
+          <div className="kpi-card-header"><div className="kpi-icon teal"><Bot size={22} /></div></div>
+          <div className="kpi-value">{totalConvs}</div>
+          <div className="kpi-label">Total AI Conversations</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-card-header">
-            <div className="kpi-icon blue"><CalendarCheck size={22} /></div>
-          </div>
-          <div className="kpi-value">32</div>
-          <div className="kpi-label">Appointments Booked by AI</div>
+          <div className="kpi-card-header"><div className="kpi-icon blue"><CalendarCheck size={22} /></div></div>
+          <div className="kpi-value">{intentBreakdown.find(i => i.intent === 'BOOK_APPOINTMENT')?.count ?? 0}</div>
+          <div className="kpi-label">Appointment Booking Intents</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-card-header">
-            <div className="kpi-icon green"><CheckCircle size={22} /></div>
-          </div>
-          <div className="kpi-value">91</div>
-          <div className="kpi-label">Patient Queries Resolved</div>
+          <div className="kpi-card-header"><div className="kpi-icon green"><CheckCircle size={22} /></div></div>
+          <div className="kpi-value">{intentBreakdown.reduce((s, i) => s + Number(i.count), 0)}</div>
+          <div className="kpi-label">Total Classified Intents</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-card-header">
-            <div className="kpi-icon amber"><AlertTriangle size={22} /></div>
-          </div>
-          <div className="kpi-value">8</div>
-          <div className="kpi-label">Human Escalations</div>
+          <div className="kpi-card-header"><div className="kpi-icon amber"><AlertTriangle size={22} /></div></div>
+          <div className="kpi-value">{escalated}</div>
+          <div className="kpi-label">Human Escalations (page)</div>
         </div>
       </div>
 
-      {/* Language & Channel Info */}
+      {/* Language & Channel info */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <div className="card" style={{ flex: 1, minWidth: 200 }}>
           <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Globe size={20} style={{ color: 'var(--primary)' }} />
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Languages Supported</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                {['English', 'Tamil', 'Hindi', 'Telugu'].map(l => (
-                  <span key={l} className="intent-badge">{l}</span>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {LANGUAGES.map(l => (
+                  <span key={l} className="intent-badge" style={{ fontSize: 11 }}>{l}</span>
                 ))}
               </div>
             </div>
@@ -76,241 +136,198 @@ const AIPatientDesk: React.FC = () => {
             <MessageSquare size={20} style={{ color: 'var(--success)' }} />
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Channels</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                <span className="channel-badge whatsapp">💬 WhatsApp</span>
-                <span className="channel-badge voice">🎙️ Voice</span>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <span className="channel-badge whatsapp">💬 WhatsApp Text</span>
+                <span className="channel-badge voice">🎤 WhatsApp Voice</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="tabs">
-        <button className={`tab ${activeTab === 'conversations' ? 'active' : ''}`} onClick={() => setActiveTab('conversations')}>
-          💬 Conversations
-        </button>
-        <button className={`tab ${activeTab === 'architecture' ? 'active' : ''}`} onClick={() => setActiveTab('architecture')}>
-          🏗️ Architecture
-        </button>
-        <button className={`tab ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => setActiveTab('voice')}>
-          🎙️ Voice Agent
-        </button>
+      {/* Intent Breakdown Chart */}
+      {intentBreakdown.length > 0 && (
+        <div className="chart-card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <h3>Intent Distribution</h3>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Last 30 Days</span>
+          </div>
+          <div className="card-body">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={intentBreakdown}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#EDF2F7" />
+                <XAxis dataKey="intent" tick={{ fontSize: 10, fill: '#8796A9' }} angle={-15} textAnchor="end" height={50} />
+                <YAxis tick={{ fontSize: 12, fill: '#8796A9' }} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0' }} />
+                <Bar dataKey="count" name="Messages" radius={[4, 4, 0, 0]}>
+                  {intentBreakdown.map((entry, index) => (
+                    <Cell key={index} fill={INTENT_COLORS[entry.intent] || CHART_COLORS[index % CHART_COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Conversations Table */}
+      <div className="card">
+        <div className="card-header">
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Recent Conversations</h3>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+              style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13 }}>
+              <option value="">All Status</option>
+              <option value="ACTIVE">Active</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="ESCALATED">Escalated</option>
+            </select>
+            <select value={langFilter} onChange={e => { setLangFilter(e.target.value); setPage(1); }}
+              style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13 }}>
+              <option value="">All Languages</option>
+              {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="table-container">
+          {loading ? (
+            <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Loading conversations...</div>
+          ) : conversations.length === 0 ? (
+            <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>No conversations found.</div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Patient</th>
+                  <th>WhatsApp #</th>
+                  <th>Language</th>
+                  <th>Intent</th>
+                  <th>Messages</th>
+                  <th>Last Active</th>
+                  <th>Status</th>
+                  <th>View</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conversations.map(c => (
+                  <tr key={c.id}>
+                    <td style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 11 }}>{c.conversation_code}</td>
+                    <td style={{ fontSize: 13 }}>{c.patient_name || <span style={{ color: 'var(--text-muted)' }}>Anonymous</span>}</td>
+                    <td style={{ fontSize: 12 }}>{c.whatsapp_number}</td>
+                    <td>
+                      <span className="intent-badge" style={{ fontSize: 11 }}>{c.language}</span>
+                    </td>
+                    <td>
+                      {c.current_intent ? (
+                        <span className="intent-badge" style={{
+                          fontSize: 10,
+                          background: `${INTENT_COLORS[c.current_intent] || '#4A90D9'}18`,
+                          color: INTENT_COLORS[c.current_intent] || '#4A90D9',
+                        }}>
+                          {c.current_intent}
+                        </span>
+                      ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 600 }}>{c.message_count}</td>
+                    <td style={{ fontSize: 12 }}>
+                      {c.last_message_at ? new Date(c.last_message_at).toLocaleString() : '—'}
+                    </td>
+                    <td>
+                      <span className={`status-badge ${c.conversation_status === 'ACTIVE' ? 'active' : c.conversation_status === 'ESCALATED' ? 'cancelled' : 'completed'}`}>
+                        {c.conversation_status}
+                      </span>
+                    </td>
+                    <td>
+                      <button className="btn btn-secondary btn-sm" onClick={() => openConversation(c)}>
+                        <Eye size={13} /> View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="pagination" style={{ padding: '16px 22px' }}>
+          <span className="pagination-info">
+            {loading ? 'Loading...' : `${total} conversations total`}
+          </span>
+          <div className="pagination-buttons">
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={14} /></button>
+            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+              const pg = i + Math.max(1, page - 3);
+              if (pg > totalPages) return null;
+              return <button key={pg} className={page === pg ? 'active' : ''} onClick={() => setPage(pg)}>{pg}</button>;
+            })}
+            <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={14} /></button>
+          </div>
+        </div>
       </div>
 
-      {/* Conversations Tab */}
-      {activeTab === 'conversations' && (
-        <div style={{ display: 'flex', gap: 20 }}>
-          {/* Conversation List */}
-          <div className="card" style={{ flex: 1, minWidth: 280 }}>
-            <div className="card-header"><h3>Recent AI Conversations</h3></div>
-            <div className="card-body" style={{ padding: 0 }}>
-              {aiConversations.map(c => (
-                <div
-                  key={c.id}
-                  onClick={() => setSelectedConv(c.id)}
-                  style={{
-                    padding: '14px 20px',
-                    borderBottom: '1px solid var(--border-light)',
-                    cursor: 'pointer',
-                    background: selectedConv === c.id ? 'var(--primary-lightest)' : 'transparent',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{c.patientName}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.timestamp.split(' ').slice(1).join(' ')}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <span className={`channel-badge ${c.channel.toLowerCase()}`}>{c.channel}</span>
-                    <span className="intent-badge">{c.intent}</span>
-                    <span className={`status-badge ${c.status.toLowerCase().replace(/ /g, '-')}`}>{c.status}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    🌐 {c.language}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Chat Window */}
-          <div style={{ flex: 1, minWidth: 320 }}>
-            {conv ? (
-              <div className="chat-container" style={{ maxWidth: '100%' }}>
-                <div className="chat-header">
-                  <div className="chat-header-avatar">
-                    {conv.channel === 'WhatsApp' ? '💬' : '🎙️'}
-                  </div>
-                  <div className="chat-header-info">
-                    <h4>{conv.patientName}</h4>
-                    <span>Meridian AI Patient Desk • {conv.language}</span>
-                  </div>
-                </div>
-                <div className="chat-messages" style={{ minHeight: 360, maxHeight: 460 }}>
-                  {conv.messages.map((m, i) => (
-                    <div key={i} className={`chat-message ${m.sender}`}>
-                      <div className="chat-bubble">{m.text}</div>
-                      <div className="chat-time">{m.time}</div>
-                    </div>
-                  ))}
-                  <div style={{ clear: 'both' }}></div>
-                </div>
-                <div className="chat-metadata">
-                  <span className="chat-metadata-item"><strong>Channel:</strong> {conv.channel}</span>
-                  <span className="chat-metadata-item"><strong>Language:</strong> {conv.language}</span>
-                  <span className="chat-metadata-item"><strong>Intent:</strong> {conv.intent}</span>
-                  <span className="chat-metadata-item"><strong>Status:</strong> {conv.status}</span>
-                  <span className="chat-metadata-item"><strong>Patient:</strong> {conv.patientName}</span>
+      {/* Conversation Messages Modal */}
+      {selectedConv && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: 'var(--bg-card)', borderRadius: 12, padding: 24,
+            width: '90%', maxWidth: 640, maxHeight: '80vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16 }}>{selectedConv.patient_name || 'Anonymous Patient'}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {selectedConv.conversation_code} · {selectedConv.whatsapp_number}
                 </div>
               </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setSelectedConv(null); setConvMessages([]); }}>
+                <X size={14} />
+              </button>
+            </div>
+
+            {loadingMessages ? (
+              <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Loading messages...</div>
             ) : (
-              <div className="card">
-                <div className="card-body" style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
-                  <Bot size={48} style={{ opacity: 0.3, marginBottom: 16 }} />
-                  <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Select a Conversation</h3>
-                  <p style={{ fontSize: 13 }}>Click on a conversation from the list to view the chat history</p>
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {(convMessages as Array<{ sender_type: string; message_text?: string; created_at: string; intent?: string }>).map((msg, idx) => (
+                  <div key={idx} style={{
+                    display: 'flex',
+                    justifyContent: msg.sender_type === 'PATIENT' ? 'flex-start' : 'flex-end',
+                  }}>
+                    <div style={{
+                      maxWidth: '78%',
+                      background: msg.sender_type === 'PATIENT' ? 'var(--bg-primary)' : 'var(--primary)',
+                      color: msg.sender_type === 'PATIENT' ? 'var(--text-primary)' : '#fff',
+                      borderRadius: 10,
+                      padding: '10px 14px',
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                    }}>
+                      <div style={{ fontSize: 10, opacity: 0.65, marginBottom: 4 }}>
+                        {msg.sender_type} {msg.intent ? `· ${msg.intent}` : ''}
+                      </div>
+                      {msg.message_text || '—'}
+                      <div style={{ fontSize: 10, opacity: 0.5, marginTop: 4 }}>
+                        {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {convMessages.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
+                    No messages recorded for this conversation.
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
-
-      {/* Architecture Tab */}
-      {activeTab === 'architecture' && (
-        <div className="card">
-          <div className="card-header"><h3>AI Patient Desk Architecture</h3></div>
-          <div className="card-body">
-            <div className="architecture-flow">
-              <div className="arch-node patient">👤 Patient</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node channel">📱 WhatsApp / 🎙️ Voice</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node ai">🤖 Meridian AI Patient Desk</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node process">🧠 Intent Detection & NLP</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node data">🗄️ Hospital Data / Appointment System</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node action">⚡ Action (Book / Reschedule / Query)</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node response">💬 AI Response</div>
-              <div className="arch-arrow">↓</div>
-              <div className="arch-node patient">👤 Patient</div>
-            </div>
-
-            <div style={{ marginTop: 32 }}>
-              <h4 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Supported AI Intents</h4>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {intents.map(intent => (
-                  <span key={intent} className="intent-badge" style={{ padding: '6px 14px', fontSize: 12 }}>
-                    {intent}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Voice Tab */}
-      {activeTab === 'voice' && (
-        <VoiceAgentUI />
-      )}
-    </div>
-  );
-};
-
-/* ═══ Voice Agent UI ═══ */
-const VoiceAgentUI: React.FC = () => {
-  const [isActive, setIsActive] = useState(true);
-  const [isMuted, setIsMuted] = useState(false);
-
-  const transcript = [
-    { speaker: 'Patient', text: 'I want to book an appointment with a cardiologist.', isAI: false },
-    { speaker: 'AI', text: 'Sure! Which date would you prefer for your cardiology appointment?', isAI: true },
-    { speaker: 'Patient', text: 'Tomorrow afternoon, please.', isAI: false },
-    { speaker: 'AI', text: 'I found two available cardiology appointments for tomorrow afternoon:\n\n1. Dr. Surendhar G — 2:00 PM\n2. Dr. G. Shanthosh — 3:30 PM\n\nWhich slot would you prefer?', isAI: true },
-    { speaker: 'Patient', text: 'The 2 PM slot with Dr. Surendhar.', isAI: false },
-    { speaker: 'AI', text: 'Your appointment with Dr. Surendhar G has been confirmed for tomorrow at 2:00 PM in the Cardiology department. Please arrive 15 minutes early. Is there anything else I can help you with?', isAI: true },
-  ];
-
-  return (
-    <div>
-      <div className="page-header" style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 18 }}>Meridian AI Voice Patient Desk</h2>
-        <p>Prototype voice interface — no real microphone integration</p>
-      </div>
-
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-        {/* Voice Control Panel */}
-        <div className="voice-container" style={{ flex: '0 0 360px' }}>
-          <button
-            className={`voice-mic-btn ${isActive ? 'active' : ''}`}
-            onClick={() => setIsActive(!isActive)}
-          >
-            {isActive ? <Phone size={36} /> : <Mic size={36} />}
-          </button>
-
-          <div className="voice-status">
-            {isActive ? '🔴 Call Active — Listening...' : 'Press to start voice call'}
-          </div>
-
-          {isActive && (
-            <>
-              <div className="voice-duration">04:32</div>
-              <div className="voice-waveform">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i} className="bar" />
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                <span className="channel-badge voice">🎙️ Voice</span>
-                <span className="intent-badge">English</span>
-                <span className="status-badge active">Active</span>
-              </div>
-            </>
-          )}
-
-          <div className="voice-controls">
-            <button
-              className={`btn ${isMuted ? 'btn-danger' : 'btn-secondary'}`}
-              onClick={() => setIsMuted(!isMuted)}
-            >
-              <Volume2 size={16} /> {isMuted ? 'Unmute' : 'Mute'}
-            </button>
-            <button className="btn btn-danger" onClick={() => setIsActive(false)}>
-              <Phone size={16} /> End Call
-            </button>
-          </div>
-
-          <div style={{ marginTop: 16, padding: '8px 12px', background: 'var(--bg-primary)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-            Select Language: &nbsp;
-            <select style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}>
-              <option>English</option>
-              <option>Tamil</option>
-              <option>Hindi</option>
-              <option>Telugu</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Transcript */}
-        <div className="card" style={{ flex: 1, minWidth: 300 }}>
-          <div className="card-header"><h3>Conversation Transcript</h3></div>
-          <div className="card-body" style={{ padding: 0 }}>
-            <div className="voice-transcript" style={{ margin: 0, background: 'white', borderRadius: 0 }}>
-              {transcript.map((item, i) => (
-                <div key={i} className="voice-transcript-item">
-                  <span className={`speaker ${item.isAI ? 'ai' : ''}`}>{item.speaker}</span>
-                  <span className="text" style={{ whiteSpace: 'pre-line' }}>{item.text}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

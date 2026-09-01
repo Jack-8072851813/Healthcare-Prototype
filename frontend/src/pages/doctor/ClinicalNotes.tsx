@@ -1,30 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { patients } from '../../data/patients';
+import { fetchPatients, type Patient } from '../../services/dashboardApi';
 import { CheckCircle, FileText, Save, X } from 'lucide-react';
 
 const ClinicalNotes: React.FC = () => {
   const { user } = useAuth();
-  const myPatients = patients.filter(p => p.assignedDoctorId === user?.loginId);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
 
-  const [selectedPatient, setSelectedPatient] = useState('');
+  const [selectedPatientId, setSelectedPatientId] = useState('');
   const [visitType, setVisitType] = useState('Consultation');
   const [notes, setNotes] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
-  const [savedNotes, setSavedNotes] = useState<Array<{ patient: string; date: string; type: string; notes: string; followUp: string }>>([]);
+  const [savedNotes, setSavedNotes] = useState<Array<{
+    patientName: string; date: string; type: string; notes: string; followUp: string
+  }>>([]);
+
+  const loadPatients = useCallback(async () => {
+    setLoadingPatients(true);
+    try {
+      const res = await fetchPatients({ per_page: 100 });
+      setPatients(res.patients);
+    } finally {
+      setLoadingPatients(false);
+    }
+  }, []);
+
+  useEffect(() => { loadPatients(); }, [loadPatients]);
 
   const handleSave = () => {
-    if (!selectedPatient || !notes) return;
-    const patientName = myPatients.find(p => p.id === selectedPatient)?.name || '';
+    if (!selectedPatientId || !notes) return;
+    const p = patients.find(pt => String(pt.id) === selectedPatientId);
+    const patientName = p ? `${p.first_name} ${p.last_name}` : 'Unknown';
     setSavedNotes(prev => [{
-      patient: patientName,
+      patientName,
       date: new Date().toISOString().split('T')[0],
       type: visitType,
       notes,
       followUp: followUpDate,
     }, ...prev]);
-    setSelectedPatient('');
+    setSelectedPatientId('');
     setNotes('');
     setFollowUpDate('');
     setShowSuccess(true);
@@ -32,7 +48,7 @@ const ClinicalNotes: React.FC = () => {
   };
 
   const handleCancel = () => {
-    setSelectedPatient('');
+    setSelectedPatientId('');
     setNotes('');
     setFollowUpDate('');
   };
@@ -41,8 +57,7 @@ const ClinicalNotes: React.FC = () => {
     <div>
       <div className="page-header">
         <h2>Clinical Notes</h2>
-        <p>Add and view clinical notes for your patients</p>
-        <span className="demo-badge">⚠️ DEMO — Notes are stored in local state only</span>
+        <p>Add and view clinical notes for your patients — {user?.name}</p>
       </div>
 
       {showSuccess && <div className="success-alert"><CheckCircle size={16} /> Clinical note saved successfully.</div>}
@@ -54,9 +69,14 @@ const ClinicalNotes: React.FC = () => {
           <div className="grid-2" style={{ gap: 16, marginBottom: 16 }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Patient</label>
-              <select value={selectedPatient} onChange={e => setSelectedPatient(e.target.value)}>
-                <option value="">Select Patient</option>
-                {myPatients.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+              <select value={selectedPatientId} onChange={e => setSelectedPatientId(e.target.value)}
+                disabled={loadingPatients}>
+                <option value="">{loadingPatients ? 'Loading patients...' : 'Select Patient'}</option>
+                {patients.map(p => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.first_name} {p.last_name} ({p.patient_code})
+                  </option>
+                ))}
               </select>
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
@@ -89,7 +109,7 @@ const ClinicalNotes: React.FC = () => {
             <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)} />
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn-primary" onClick={handleSave} disabled={!selectedPatient || !notes}>
+            <button className="btn btn-primary" onClick={handleSave} disabled={!selectedPatientId || !notes}>
               <Save size={16} /> Save Note
             </button>
             <button className="btn btn-secondary" onClick={handleCancel}>
@@ -99,10 +119,10 @@ const ClinicalNotes: React.FC = () => {
         </div>
       </div>
 
-      {/* Saved Notes */}
+      {/* Saved Notes (session only) */}
       {savedNotes.length > 0 && (
         <div className="card">
-          <div className="card-header"><h3>Recent Clinical Notes</h3></div>
+          <div className="card-header"><h3>Recent Clinical Notes (This Session)</h3></div>
           <div className="table-container">
             <table className="data-table">
               <thead>
@@ -111,7 +131,7 @@ const ClinicalNotes: React.FC = () => {
               <tbody>
                 {savedNotes.map((n, i) => (
                   <tr key={i}>
-                    <td style={{ fontWeight: 500 }}>{n.patient}</td>
+                    <td style={{ fontWeight: 500 }}>{n.patientName}</td>
                     <td>{n.date}</td>
                     <td><span className="intent-badge">{n.type}</span></td>
                     <td style={{ maxWidth: 300, fontSize: 13 }}>{n.notes.substring(0, 100)}{n.notes.length > 100 ? '...' : ''}</td>

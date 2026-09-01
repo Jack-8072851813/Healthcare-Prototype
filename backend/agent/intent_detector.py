@@ -86,16 +86,25 @@ PATTERNS = {
         r"(داخلہ|ایڈمیشن|سرجری)"
     ],
     "HOSPITAL_INFORMATION": [
-        r"\b(location|address|directions|phone\s*number|contact|map|website|hospital\s*info|timings|visiting\s*hours|where|hospital)\b",
-        r"(முகவரி|தொலைபேசி|இடம்|வழித்தடம்)",
-        r"(पता|लोकेशन|फोन\s*नंबर|संपर्क|अस्पताल\s*के\s*बारे\s*में)",
-        r"(చిరునామా|ఫోన్|లోకేషన్)",
-        r"(വിലാസം|ഫോൺ|സ്ഥലം|രോഗീവിവരം)",
-        r"(ವಿಳಾಸ|ಫೋನ್|ಸ್ಥಳ)",
-        r"(پتہ|لوکیشن|فون|معلومات)"
+        r"\b(location|address|directions|phone\s*number|contact|map|website|hospital\s*info|timings|visiting\s*hours|where|hospital|department|departments|specialty|specialties|facility|facilities|services|faq)\b",
+        r"(முகவரி|தொலைபேசி|இடம்|வழித்தடம்|துறைகள்|துறை|வசதிகள்|மருத்துவமனை|எங்கே)",
+        r"(पता|लोकेशन|फोन\s*नंबर|संपर्क|अस्पताल\s*के\s*बारे\s*में|विभाग|सुविधाएं|अस्पताल|कहाँ)",
+        r"(చిరునామా|ఫోన్|లోకేషన్|విభాగాలు|సదుపాయాలు|ఆసుపత్రి|ఎక్కడ)",
+        r"(വിലാസം|ഫോൺ|സ്ഥലം|രോഗീവിവരം|വകുപ്പുകൾ|സൗകര്യങ്ങൾ|ആശുപത്രി|എവിടെ)",
+        r"(ವಿಳಾಸ|ಫೋನ್|ಸ್ಥಳ|ವಿಭಾಗಗಳು|ಸೌಲಭ್ಯಗಳು|ಆಸ್ಪತ್ರೆ|ಎಲ್ಲಿದೆ)",
+        r"(پتہ|لوکیشن|فون|معلومات|شعبہ|شعبہ جات|سہولیات|ہسپتال|کہاں)"
+    ],
+    "REGISTER_PATIENT": [
+        r"\b(register\s*patient|register\s*account|new\s*patient\s*registration|patient\s*registration|register|registration|signup)\b",
+        r"(பதிவு|புதிய\s*நோயாளி)",
+        r"(पंजीकरण|नया\s*मरीज)",
+        r"(నమోదు)",
+        r"(രജിസ്ട്രേഷൻ)",
+        r"(ನೋಂದಣಿ)",
+        r"(رجسٹریشن)"
     ],
     "BOOK_APPOINTMENT": [
-        r"\b(book|appointment|booking|register\s*appointment|need\s*appointment|schedule\s*appointment|consult|consultation|see\s*a\s*doctor|appointment\s*time|booking\s*time|reschedule\s*time|what\s*time|what\s*times|available\s*time|available\s*times|available\s*slot|slot|slots|free\s*slot|see\s*dr|meet\s*dr|consult\s*dr|see\s*doctor|meet\s*doctor|consult\s*doctor|meet|cardiologist|cardialogist|cardiology|heart\s*doctor|heart\s*specialist|cardiac\s*doctor|cardiology\s*doctor|pediatrician|neurologist|gynecologist|orthopedist|dermatologist|physician)\b",
+        r"\b(book|appointment|booking|need\s*appointment|schedule\s*appointment|consult|consultation|see\s*a\s*doctor|appointment\s*time|booking\s*time|reschedule\s*time|what\s*time|what\s*times|available\s*time|available\s*times|available\s*slot|slot|slots|free\s*slot|see\s*dr|meet\s*dr|consult\s*dr|see\s*doctor|meet\s*doctor|consult\s*doctor|meet|cardiologist|cardialogist|cardiology|heart\s*doctor|heart\s*specialist|cardiac\s*doctor|cardiology\s*doctor|pediatrician|neurologist|gynecologist|orthopedist|dermatologist|physician)\b",
         r"(பதிவு|அப்பாயிண்ட்மெண்ட்|சந்திப்பு)",
         r"(बुक|अपॉइंटमेंट|पंजीकरण|दिखाना|परामर्श)",
         r"(అపాయింట్మెంట్|బుక్|వైద్యుని\s*కలవాలి)",
@@ -155,6 +164,15 @@ def detect_intent(text: str, current_intent: str = None) -> str:
             if re.search(pattern, text_lower):
                 matched_intents.append(intent)
                 break
+
+    # If we are in an active transaction workflow (e.g. BOOK_APPOINTMENT slot filling),
+    # preserve the current intent unless the user explicitly triggers an intent override (CANCEL, EMERGENCY, ESCALATION, LANGUAGE).
+    if current_intent in ["BOOK_APPOINTMENT", "REGISTER_PATIENT", "IDENTIFY_PATIENT", "RESCHEDULE_APPOINTMENT", "CANCEL_APPOINTMENT"]:
+        if "CANCEL_APPOINTMENT" in matched_intents and current_intent != "CANCEL_APPOINTMENT":
+            return "CANCEL_APPOINTMENT"
+        if "RESCHEDULE_APPOINTMENT" in matched_intents and current_intent != "RESCHEDULE_APPOINTMENT":
+            return "RESCHEDULE_APPOINTMENT"
+        return current_intent
                 
     if matched_intents:
         # If multiple match, prioritize transactional intents
@@ -163,9 +181,8 @@ def detect_intent(text: str, current_intent: str = None) -> str:
                 return prio
         return matched_intents[0]
         
-    # If no intent matches but we have an ongoing slot-filling intent, keep it!
-    if current_intent in ["BOOK_APPOINTMENT", "CANCEL_APPOINTMENT", "RESCHEDULE_APPOINTMENT"]:
-        # If they just entered text that could be slots (like a date, time, reason, or name), preserve current intent
+    # If no intent matches but we have an ongoing workflow, keep it!
+    if current_intent in ["REGISTER_PATIENT", "IDENTIFY_PATIENT", "BOOK_APPOINTMENT", "CANCEL_APPOINTMENT", "RESCHEDULE_APPOINTMENT", "POST_BOOKING"]:
         return current_intent
 
     return "UNKNOWN"

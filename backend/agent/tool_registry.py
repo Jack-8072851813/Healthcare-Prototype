@@ -154,22 +154,26 @@ def tool_get_appointment_status(conversation_code: str, booking_id: str, patient
         log_agent_action(conversation_code, "GET_APPOINTMENT_STATUS", "APPOINTMENT_STATUS", input_data, {}, "FAILED", err_msg)
         return {"success": False, "error_code": "UNKNOWN_ERROR", "error": err_msg}
 
-def tool_get_hospital_information(conversation_code: str, query: str = "") -> dict:
-    # Simulates RAG query against database knowledge chunks
-    input_data = {"query": query}
-    conn = db_config.get_db_connection()
-    cur = conn.cursor()
+def tool_search_knowledge(conversation_code: str, query: str, category_hint: str = None, language: str = "ENGLISH") -> dict:
+    """Search the Meridian Hospital knowledge base using full-text retrieval."""
+    input_data = {"query": query, "category_hint": category_hint, "language": language}
     try:
-        cur.execute("SELECT content FROM knowledge_chunks LIMIT 3;")
-        rows = cur.fetchall()
-        contents = [r[0] for r in rows]
-        res = {"success": True, "chunks": contents}
-        log_agent_action(conversation_code, "GET_HOSPITAL_INFORMATION", "HOSPITAL_INFORMATION", input_data, res, "SUCCESS")
+        import knowledge.knowledge_retriever as knowledge_retriever
+        results = knowledge_retriever.search(
+            query=query,
+            language=language,
+            category_hint=category_hint,
+            top_k=3
+        )
+        res = {"success": True, "results": results, "total": len(results)}
+        log_agent_action(conversation_code, "GET_HOSPITAL_INFORMATION", "HOSPITAL_INFORMATION", input_data, {"total": len(results)}, "SUCCESS")
         return res
     except Exception as e:
         err_msg = str(e)
         log_agent_action(conversation_code, "GET_HOSPITAL_INFORMATION", "HOSPITAL_INFORMATION", input_data, {}, "FAILED", err_msg)
-        return {"success": False, "error": err_msg}
-    finally:
-        cur.close()
-        conn.close()
+        return {"success": False, "error": err_msg, "results": [], "total": 0}
+
+
+def tool_get_hospital_information(conversation_code: str, query: str = "") -> dict:
+    """Delegates to tool_search_knowledge for backward compatibility."""
+    return tool_search_knowledge(conversation_code, query)

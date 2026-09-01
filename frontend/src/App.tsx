@@ -11,6 +11,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import PatientManagement from './pages/admin/PatientManagement';
 import PatientProfile from './pages/admin/PatientProfile';
 import DoctorManagement from './pages/admin/DoctorManagement';
+import DoctorSchedules from './pages/admin/DoctorSchedules';
 import AppointmentManagement from './pages/admin/AppointmentManagement';
 import DepartmentPage from './pages/admin/DepartmentPage';
 import AIPatientDesk from './pages/admin/AIPatientDesk';
@@ -18,28 +19,7 @@ import PreAdmissionPage from './pages/admin/PreAdmissionPage';
 import ReportsPage from './pages/admin/ReportsPage';
 import HospitalInfoPage from './pages/admin/HospitalInfoPage';
 import SettingsPage from './pages/admin/SettingsPage';
-
-// AI Module Pages — Overview
-import OverviewPage from './pages/admin/OverviewPage';
-
-// AI Module Pages — Revenue Cycle
-import RCMDashboard from './pages/admin/rcm/RCMDashboard';
-import ClaimList from './pages/admin/rcm/ClaimList';
-import ClaimDetail from './pages/admin/rcm/ClaimDetail';
-
-// AI Module Pages — Bed Allocation
-import BedDashboard from './pages/admin/beds/BedDashboard';
-import BedForecast from './pages/admin/beds/BedForecast';
-
-// AI Module Pages — Radiology Triage Assistant
-import RadiologyDashboard from './pages/admin/radiology/RadiologyDashboard';
-import RadiologyWorklist from './pages/admin/radiology/RadiologyWorklist';
-import AnalyzeXRay from './pages/admin/radiology/AnalyzeXRay';
-import StudyDetail from './pages/admin/radiology/StudyDetail';
-import ModelPerformance from './pages/admin/radiology/ModelPerformance';
-import DatabricksPipeline from './pages/admin/radiology/DatabricksPipeline';
-import ArchitecturePage from './pages/admin/radiology/ArchitecturePage';
-import AboutPoC from './pages/admin/radiology/AboutPoC';
+import EscalationPage from './pages/admin/EscalationPage';
 
 // Doctor Pages
 import DoctorDashboard from './pages/doctor/DoctorDashboard';
@@ -81,6 +61,7 @@ const AppRoutes: React.FC = () => {
         <Route path="patients" element={<PatientManagement />} />
         <Route path="patients/:id" element={<PatientProfile />} />
         <Route path="doctors" element={<DoctorManagement />} />
+        <Route path="schedules" element={<DoctorSchedules />} />
         <Route path="appointments" element={<AppointmentManagement />} />
         <Route path="departments" element={<DepartmentPage />} />
         <Route path="ai-desk" element={<AIPatientDesk />} />
@@ -88,24 +69,7 @@ const AppRoutes: React.FC = () => {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="hospital-info" element={<HospitalInfoPage />} />
         <Route path="settings" element={<SettingsPage />} />
-
-        {/* AI Modules */}
-        <Route path="overview" element={<OverviewPage />} />
-        <Route path="revenue-cycle" element={<RCMDashboard />} />
-        <Route path="revenue-cycle/claims" element={<ClaimList />} />
-        <Route path="revenue-cycle/claims/:id" element={<ClaimDetail />} />
-        <Route path="bed-allocation" element={<BedDashboard />} />
-        <Route path="bed-allocation/forecast" element={<BedForecast />} />
-
-        {/* Radiology Triage Assistant */}
-        <Route path="radiology" element={<RadiologyDashboard />} />
-        <Route path="radiology/worklist" element={<RadiologyWorklist />} />
-        <Route path="radiology/analyze" element={<AnalyzeXRay />} />
-        <Route path="radiology/studies/:id" element={<StudyDetail />} />
-        <Route path="radiology/performance" element={<ModelPerformance />} />
-        <Route path="radiology/pipeline" element={<DatabricksPipeline />} />
-        <Route path="radiology/architecture" element={<ArchitecturePage />} />
-        <Route path="radiology/about" element={<AboutPoC />} />
+        <Route path="escalations" element={<EscalationPage />} />
       </Route>
 
       {/* Doctor Routes */}

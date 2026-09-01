@@ -13,6 +13,8 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+import os
+
 DB_PATH = "hospital.db"
 
 app = FastAPI(
@@ -21,16 +23,26 @@ app = FastAPI(
     version="1.0.0",
 )
 
+ALLOWED_CORS_ORIGINS = os.getenv("ALLOWED_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
+origins = [origin.strip() for origin in ALLOWED_CORS_ORIGINS.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 import api.agent_routes as agent_routes
+import api.whatsapp_routes as whatsapp_routes
+import api.dashboard_routes as dashboard_routes
+import api.auth_routes as auth_routes
 app.include_router(agent_routes.router)
+app.include_router(agent_routes.knowledge_router)
+app.include_router(whatsapp_routes.router)
+app.include_router(dashboard_routes.router)
+app.include_router(auth_routes.router)
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
