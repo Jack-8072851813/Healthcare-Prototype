@@ -38,7 +38,6 @@ const Sidebar: React.FC = () => {
 
   const doctorMenuItems: MenuItem[] = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/doctor/dashboard' },
-    { label: 'My Patients', icon: Users, path: '/doctor/my-patients' },
     { label: 'Appointments', icon: CalendarCheck, path: '/doctor/appointments' },
     { label: 'Patient Records', icon: FileText, path: '/doctor/patient-records' },
     { label: 'Clinical Notes', icon: ClipboardPlus, path: '/doctor/clinical-notes' },

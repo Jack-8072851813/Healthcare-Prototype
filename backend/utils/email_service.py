@@ -7,6 +7,34 @@ import db_config
 # Ensure dotenv is loaded
 db_config.load_dotenv()
 
+def log_email_status(
+    email_type: str,
+    recipient: str,
+    subject: str,
+    status: str,
+    appointment_id: int = None,
+    doctor_id: int = None,
+    provider_message_id: str = None,
+    failure_reason: str = None
+):
+    """Inserts record into email_logs table."""
+    conn = db_config.get_db_connection()
+    cur = conn.cursor()
+    try:
+        sent_at_sql = "now()" if "SENT" in status else "NULL"
+        cur.execute(f"""
+            INSERT INTO email_logs 
+            (email_type, recipient, appointment_id, doctor_id, subject, status, provider_message_id, failure_reason, sent_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, {sent_at_sql});
+        """, (email_type, recipient, appointment_id, doctor_id, subject, status, provider_message_id, failure_reason))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print("Failed to log email status to DB:", e)
+    finally:
+        cur.close()
+        conn.close()
+
 def _send_email_raw(to_email: str, subject: str, body_html: str, body_text: str) -> bool:
     """Internal helper to dispatch email via standard SMTP."""
     db_config.load_dotenv()
@@ -46,28 +74,14 @@ def _send_email_raw(to_email: str, subject: str, body_html: str, body_text: str)
         print(f"[EMAIL DISPATCH ERROR] Failed to send email to {to_email}: {e}")
         print(f"=== SIMULATED EMAIL BODY ===\n{body_text}\n===========================\n")
         return False
-        msg.attach(MIMEText(body_html, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_FROM_EMAIL, [to_email], msg.as_string())
-            
-        print(f"[EMAIL DISPATCH] Successfully sent email to {to_email}")
-        return True
-    except Exception as e:
-        print(f"[EMAIL DISPATCH ERROR] Failed to send email to {to_email}: {e}")
-        # Always output email text so it can be seen in server logs
-        print(f"=== SIMULATED EMAIL BODY ===\n{body_text}\n===========================\n")
-        return False
-
-def send_welcome_email(doctor_email: str, doctor_name: str, username: str, password: str) -> bool:
+def send_welcome_email(doctor_email: str, doctor_name: str, username: str, password: str, doctor_id: int = None) -> bool:
     """Send welcome email with login credentials to a newly registered doctor."""
     if not doctor_email:
         print("[EMAIL DISPATCH] Doctor email missing. Skipping welcome email.")
         return False
 
-    subject = "Welcome to Meridian Hospital — Your Doctor Account Details"
+    subject = "Welcome to Meridian Hospital - Doctor Account Created"
     
     body_text = f"""Dear {doctor_name},
 
@@ -109,7 +123,104 @@ Kolathur, Chennai
     </div>
     """
 
-    return _send_email_raw(doctor_email, subject, body_html, body_text)
+    success = _send_email_raw(doctor_email, subject, body_html, body_text)
+    status_code = "DOCTOR_WELCOME_EMAIL_SENT" if success else "DOCTOR_WELCOME_EMAIL_FAILED"
+    fail_msg = None if success else "SMTP delivery failed"
+    log_email_status("DOCTOR_WELCOME", doctor_email, subject, status_code, doctor_id=doctor_id, failure_reason=fail_msg)
+    return success
+
+def send_patient_appointment_confirmation_email(
+    patient_email: str,
+    patient_name: str,
+    appointment_for: str,
+    doctor_name: str,
+    department_name: str,
+    appointment_date: str,
+    appointment_time: str,
+    booking_id: str,
+    appointment_id: int = None
+) -> bool:
+    """Send appointment confirmation email to patient or parent/guardian."""
+    if not patient_email:
+        print("[EMAIL DISPATCH] Patient email missing. Skipping appointment confirmation email.")
+        return False
+
+    subject = "Appointment Confirmation - Meridian Hospital"
+    patient_type_label = f" (for {appointment_for})" if appointment_for and appointment_for.upper() != "SELF" else ""
+
+    body_text = f"""Dear {patient_name},
+
+Thank you for choosing Meridian Hospital! Your appointment has been successfully confirmed.
+
+Appointment Details:
+--------------------
+Booking ID: {booking_id}
+Patient Name: {patient_name}{patient_type_label}
+Doctor: {doctor_name}
+Department: {department_name}
+Date: {appointment_date}
+Time: {appointment_time}
+
+Hospital Location:
+Meridian Hospital, Kolathur, Chennai - 600099
+Phone: +91 44 2654 3210
+
+Please arrive 15 minutes before your scheduled appointment time.
+
+Warm regards,
+Meridian Hospital Scheduling Team
+"""
+
+    body_html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #E2E8F0; border-radius: 8px; padding: 24px; color: #2D3748;">
+        <div style="background-color: #2B6CB0; padding: 16px; border-radius: 6px 6px 0 0; color: white; text-align: center;">
+            <h3 style="margin: 0;">Appointment Confirmed</h3>
+            <p style="margin: 4px 0 0 0; font-size: 14px;">Meridian Hospital · Kolathur, Chennai</p>
+        </div>
+        <div style="padding: 20px 0;">
+            <p>Dear <strong>{patient_name}</strong>,</p>
+            <p>Your appointment at Meridian Hospital has been confirmed successfully!</p>
+            
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+                <tr style="background-color: #F7FAFC;">
+                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #E2E8F0;">Booking ID</td>
+                    <td style="padding: 8px 12px; border: 1px solid #E2E8F0; color: #2B6CB0; font-weight: bold;">{booking_id}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #E2E8F0;">Patient Name</td>
+                    <td style="padding: 8px 12px; border: 1px solid #E2E8F0;">{patient_name}{patient_type_label}</td>
+                </tr>
+                <tr style="background-color: #F7FAFC;">
+                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #E2E8F0;">Doctor</td>
+                    <td style="padding: 8px 12px; border: 1px solid #E2E8F0;">{doctor_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #E2E8F0;">Department</td>
+                    <td style="padding: 8px 12px; border: 1px solid #E2E8F0;">{department_name}</td>
+                </tr>
+                <tr style="background-color: #F7FAFC;">
+                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #E2E8F0;">Date</td>
+                    <td style="padding: 8px 12px; border: 1px solid #E2E8F0;">{appointment_date}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 12px; font-weight: bold; border: 1px solid #E2E8F0;">Time</td>
+                    <td style="padding: 8px 12px; border: 1px solid #E2E8F0;">{appointment_time}</td>
+                </tr>
+            </table>
+            
+            <p style="font-size: 13px; color: #718096;">Please arrive 15 minutes prior to your appointment time.</p>
+        </div>
+        <div style="font-size: 12px; color: #A0AEC0; text-align: center; border-top: 1px solid #E2E8F0; padding-top: 12px;">
+            Meridian Hospital · Kolathur, Chennai · Phone: +91 44 2654 3210
+        </div>
+    </div>
+    """
+
+    success = _send_email_raw(patient_email, subject, body_html, body_text)
+    status_code = "EMAIL_SENT" if success else "EMAIL_FAILED"
+    fail_msg = None if success else "SMTP delivery failed or credentials not configured"
+    log_email_status("APPOINTMENT_CONFIRMATION", patient_email, subject, status_code, appointment_id=appointment_id, failure_reason=fail_msg)
+    return success
 
 def send_appointment_notification_email(
     doctor_email: str,

@@ -75,7 +75,7 @@ const AppRoutes: React.FC = () => {
       {/* Doctor Routes */}
       <Route path="/doctor" element={<ProtectedRoute role="doctor"><AppLayout /></ProtectedRoute>}>
         <Route path="dashboard" element={<DoctorDashboard />} />
-        <Route path="my-patients" element={<MyPatients />} />
+        <Route path="my-patients" element={<Navigate to="/doctor/patient-records" replace />} />
         <Route path="appointments" element={<DoctorAppointments />} />
         <Route path="patient-records" element={<PatientRecords />} />
         <Route path="patient-records/:id" element={<PatientProfile />} />

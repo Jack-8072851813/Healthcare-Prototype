@@ -344,7 +344,8 @@ def get_patients(
         cur.execute(
             f"""
             SELECT id, patient_code, first_name, last_name, date_of_birth, gender,
-                   phone, whatsapp_number, email, city, blood_group, status, created_at
+                   phone, whatsapp_number, email, city, blood_group, status, created_at,
+                   guardian_patient_id, guardian_phone, relationship_to_contact, is_dependent
             FROM patients
             {where}
             ORDER BY created_at DESC
@@ -626,7 +627,7 @@ def get_appointments(
                    a.booking_source, a.patient_reason, a.cancellation_reason, a.created_at,
                    p.id as patient_id, p.patient_code,
                    (p.first_name || ' ' || p.last_name) as patient_name,
-                   p.phone as patient_phone,
+                   p.phone as patient_phone, p.relationship_to_contact, p.guardian_phone, p.is_dependent, p.guardian_patient_id,
                    d.id as doctor_id, d.display_name as doctor_name, d.specialization,
                    dept.id as department_id, dept.department_name
             FROM appointments a

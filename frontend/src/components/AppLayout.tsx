@@ -19,7 +19,6 @@ const pageTitles: Record<string, string> = {
   '/admin/settings': 'Settings',
   // Doctor
   '/doctor/dashboard': 'Doctor Dashboard',
-  '/doctor/my-patients': 'My Patients',
   '/doctor/appointments': 'My Appointments',
   '/doctor/patient-records': 'Patient Records',
   '/doctor/clinical-notes': 'Clinical Notes',

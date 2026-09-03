@@ -11,6 +11,8 @@ import db_config
 
 import copy
 
+from utils.phone_utils import get_phone_query_condition, get_phone_query_params, normalize_phone
+
 def get_default_state():
     return {
         "conversation_id": None,
@@ -18,6 +20,7 @@ def get_default_state():
         "patient_type": None,
         "language": "ENGLISH",
         "intent": "GREETING",
+        # Booking / department context
         "entities": {
             "patient_id": None,
             "doctor_id": None,
@@ -27,26 +30,49 @@ def get_default_state():
             "booking_id": None,
             "reason": None
         },
+        # Convenience resolved labels (populated during booking flow)
+        "department_name": None,
+        "specialty": None,
+        "doctor_name": None,
+        "full_name": None,
+        # Booking flow state
         "missing_information": [],
+        "booking_stage": None,
         "last_action": None,
+        "confirmation_pending": False,
+        "confirmation_details": {},
+        "change_pending": False,
+        "change_pending_field": None,
+        "previous_question": None,
+        "interactive_buttons": [],
+        # Registration fields
         "registration_fields": {
             "first_name": None,
             "last_name": None,
             "date_of_birth": None,
             "gender": None,
-            "phone": None
+            "phone": None,
+            "reason_for_visit": None
         },
-        "confirmation_pending": False,
-        "confirmation_details": {},
-        "interactive_buttons": [],
-        "previous_question": None
+        # Time-of-day split parsing (e.g. patient says '5' then 'PM' in separate messages)
+        "pending_time_digit": None,
+        # Dependent / family patient flow
+        "appointment_for": None,           # SELF | CHILD | FAMILY_MEMBER
+        "patient_relationship": None,       # SON | DAUGHTER | SPOUSE | MOTHER | FATHER | CHILD | SIBLING | DEPENDENT
+        "actual_patient_id": None,          # patient_id of the dependent (not the contact)
+        "actual_patient_name": None,        # name of dependent
+        "contact_patient_id": None,         # patient_id of the WhatsApp sender
+        "dependent_collection_stage": None, # which field we are collecting for dependent
+        # Last sent/received for context
+        "last_user_message": None,
+        "last_bot_message": None,
     }
 
 def resolve_valid_patient_id(cur, candidate_patient_id: int = None, whatsapp_number: str = None) -> int:
     """
     Validates candidate_patient_id against the patients table.
     If valid, returns candidate_patient_id.
-    If invalid/stale or None, attempts to resolve an ACTIVE patient by phone or whatsapp_number.
+    If invalid/stale or None, attempts to resolve an ACTIVE patient by phone or whatsapp_number using 10-digit normalization.
     Returns valid patient_id (int) or None if no matching patient exists.
     """
     if candidate_patient_id is not None:
@@ -59,15 +85,22 @@ def resolve_valid_patient_id(cur, candidate_patient_id: int = None, whatsapp_num
 
     if whatsapp_number:
         try:
-            cur.execute(
-                "SELECT id FROM patients WHERE (phone = %s OR whatsapp_number = %s) AND status = 'ACTIVE' LIMIT 1;",
-                (whatsapp_number, whatsapp_number)
-            )
+            cond = get_phone_query_condition()
+            params = get_phone_query_params(whatsapp_number)
+            query = f"SELECT id, whatsapp_number FROM patients WHERE {cond} AND status = 'ACTIVE' LIMIT 1;"
+            cur.execute(query, params)
             row = cur.fetchone()
             if row:
-                return row[0]
-        except Exception:
-            pass
+                pat_id, curr_wnum = row[0], row[1]
+                # Sync whatsapp_number if empty or not updated
+                if not curr_wnum and whatsapp_number:
+                    try:
+                        cur.execute("UPDATE patients SET whatsapp_number = %s WHERE id = %s;", (whatsapp_number, pat_id))
+                    except Exception:
+                        pass
+                return pat_id
+        except Exception as e:
+            print("Error in resolve_valid_patient_id:", e)
 
     return None
 
@@ -78,6 +111,11 @@ def get_conversation_state(conversation_code: str, whatsapp_number: str = "91999
     If it exists, retrieves the state from the metadata of the latest logged message.
     Validates and reconciles patient_id against the patients table.
     """
+    if (not whatsapp_number or whatsapp_number == "919999999999") and conversation_code and conversation_code.startswith("WA_"):
+        parts = conversation_code.split("_")
+        if len(parts) >= 2 and parts[1].isdigit():
+            whatsapp_number = parts[1]
+
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
@@ -171,25 +209,52 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
         if isinstance(state_dict.get("entities"), dict):
             state_dict["entities"]["patient_id"] = valid_patient_id
             
-        intent = state_dict.get("intent", "GREETING")
-        language = state_dict.get("language", "ENGLISH")
-        
-        # Valid intents matching Check constraints in migrations
-        valid_intents = [
-            'GREETING', 'BOOK_APPOINTMENT', 'CANCEL_APPOINTMENT', 'RESCHEDULE_APPOINTMENT', 
-            'APPOINTMENT_STATUS', 'DOCTOR_AVAILABILITY', 'HOSPITAL_INFORMATION', 
-            'DEPARTMENT_INFORMATION', 'SYMPTOM_GUIDANCE', 'PRE_ADMISSION', 'HUMAN_ESCALATION'
-        ]
-        db_intent = intent if intent in valid_intents else 'GREETING'
-        
-        cur.execute("""
-            UPDATE conversations
-            SET patient_id = %s,
-                language = %s,
-                current_intent = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE conversation_code = %s;
-        """, (valid_patient_id, language, db_intent, conversation_code))
+            LANG_MAP = {
+                'EN': 'ENGLISH', 'ENGLISH': 'ENGLISH',
+                'TA': 'TAMIL', 'TAMIL': 'TAMIL',
+                'HI': 'HINDI', 'HINDI': 'HINDI',
+                'TE': 'TELUGU', 'TELUGU': 'TELUGU',
+                'ML': 'MALAYALAM', 'MALAYALAM': 'MALAYALAM',
+                'KN': 'KANNADA', 'KANNADA': 'KANNADA',
+                'UR': 'URDU', 'URDU': 'URDU'
+            }
+            raw_lang = state_dict.get("language", "ENGLISH")
+            db_language = LANG_MAP.get(str(raw_lang).upper(), 'ENGLISH')
+    
+            # Valid intents matching CHECK constraints in migrations
+            # Map agent-side intents to valid DB intents
+            INTENT_TO_DB = {
+                'DEPENDENT_PATIENT': 'BOOK_APPOINTMENT',
+                'THANK_YOU': 'GREETING',
+                'GOODBYE': 'GREETING',
+                'APPOINTMENT_CONFIRMATION': 'BOOK_APPOINTMENT',
+                'APPOINTMENT_TIME': 'BOOK_APPOINTMENT',
+                'APPOINTMENT_DATE': 'BOOK_APPOINTMENT',
+                'EMERGENCY_GUIDANCE': 'HOSPITAL_INFORMATION',
+                'IDENTIFY_PATIENT': 'GREETING',
+                'POST_BOOKING': 'BOOK_APPOINTMENT',
+                'LANGUAGE_CHANGE': 'GREETING',
+                # REGISTER_PATIENT is not in DB CHECK constraint → map to GREETING
+                'REGISTER_PATIENT': 'GREETING',
+                'UNKNOWN': 'GREETING',
+            }
+            valid_intents = [
+                'GREETING', 'BOOK_APPOINTMENT', 'CANCEL_APPOINTMENT', 'RESCHEDULE_APPOINTMENT', 
+                'APPOINTMENT_STATUS', 'DOCTOR_AVAILABILITY', 'HOSPITAL_INFORMATION', 
+                'DEPARTMENT_INFORMATION', 'SYMPTOM_GUIDANCE', 'PRE_ADMISSION', 'HUMAN_ESCALATION',
+                'REGISTER_PATIENT'
+            ]
+            intent = state_dict.get("intent", "GREETING")
+            db_intent = INTENT_TO_DB.get(intent, intent if intent in valid_intents else 'GREETING')
+    
+            cur.execute("""
+                UPDATE conversations
+                SET patient_id = %s,
+                    language = %s,
+                    current_intent = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE conversation_code = %s;
+            """, (valid_patient_id, db_language, db_intent, conversation_code))
         conn.commit()
     except Exception as e:
         conn.rollback()

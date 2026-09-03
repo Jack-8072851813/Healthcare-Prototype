@@ -56,7 +56,7 @@ def test_valid_patient_id():
         # Create a valid test patient
         cur.execute("""
             INSERT INTO patients (patient_code, first_name, last_name, date_of_birth, gender, phone, whatsapp_number, status)
-            VALUES ('P9901', 'ValidTest', 'User', '1990-01-01', 'Male', '9199990001', '9199990001', 'ACTIVE')
+            VALUES ('P9966', 'ValidTest', 'User', '1990-01-01', 'Male', '9199990001', '9199990001', 'ACTIVE')
             RETURNING id;
         """)
         valid_pid = cur.fetchone()[0]
@@ -205,14 +205,11 @@ def test_registration_flow_after_stale_session_recovery():
     res1 = process_agent_message(conv_code, patient_code=None, message_text="Register patient")
     assert res1["success"] is True
 
-    # Provide registration details sequentially
-    process_agent_message(conv_code, patient_code=None, message_text="John")
-    process_agent_message(conv_code, patient_code=None, message_text="Doe")
-    process_agent_message(conv_code, patient_code=None, message_text="1990-05-15")
-    res_gender = process_agent_message(conv_code, patient_code=None, message_text="Male")
-    res_final = process_agent_message(conv_code, patient_code=None, message_text=phone)
+    # Provide registration details together
+    res2 = process_agent_message(conv_code, patient_code=None, message_text="John Doe, 1990-05-15, Male, 9199990006, General Consultation")
+    res_final = process_agent_message(conv_code, patient_code=None, message_text="Confirm")
 
-    assert ("Your registration is complete" in res_final["response"]) or ("Your registration is complete" in res_gender["response"])
+    assert ("created successfully" in res_final["response"]) or ("Patient Code" in res_final["response"])
 
     # Verify newly created patient ID is saved on conversation
     conn = db_config.get_db_connection()

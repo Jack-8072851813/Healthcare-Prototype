@@ -69,15 +69,22 @@ const PatientProfile: React.FC = () => {
         setError('Patient not found or access denied.');
         return;
       }
-      setPatient(data.patient as unknown as PatientDetail);
+      const patDetail = data.patient as unknown as PatientDetail;
+      setPatient(patDetail);
       setAppointments(data.appointments);
       setConversations(data.conversations);
+
+      const searchParams = new URLSearchParams(location.search);
+      if (searchParams.get('edit') === 'true') {
+        setEditData({ ...patDetail });
+        setEditMode(true);
+      }
     } catch {
       setError('Failed to load patient data.');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, location.search]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

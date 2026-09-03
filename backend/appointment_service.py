@@ -33,14 +33,14 @@ class InvalidStatusTransitionError(AppointmentError):
 
 def validate_patient(cur, patient_id):
     """Checks if the patient exists and is active."""
-    cur.execute("SELECT first_name, last_name, phone, whatsapp_number, status FROM patients WHERE id = %s;", (patient_id,))
+    cur.execute("SELECT first_name, last_name, phone, whatsapp_number, email, relationship_to_contact, status FROM patients WHERE id = %s;", (patient_id,))
     row = cur.fetchone()
     if not row:
         raise EntityNotFoundError(f"Patient with ID {patient_id} does not exist.", "PATIENT_NOT_FOUND")
-    first_name, last_name, phone, whatsapp, status = row
+    first_name, last_name, phone, whatsapp, email, rel, status = row
     if status != 'ACTIVE':
         raise AppointmentError(f"Patient with ID {patient_id} is inactive.", "PATIENT_INACTIVE")
-    return {"name": f"{first_name} {last_name}", "phone": phone, "whatsapp_number": whatsapp}
+    return {"name": f"{first_name} {last_name}", "phone": phone, "whatsapp_number": whatsapp, "email": email, "relationship_to_contact": rel}
 
 def validate_doctor(cur, doctor_id):
     """Checks if the doctor exists and is active."""
@@ -304,10 +304,10 @@ def book_appointment(patient_id, doctor_id, department_id, date_str, time_str, p
         conn.commit()
         print(f"[BOOKING_TRANSACTION] Successfully committed appointment ID {appt_id} (Booking ID: {booking_id}) to PostgreSQL database.")
 
-        # Dispatch email alert to doctor asynchronously in background thread
-        def _send_async_doctor_email():
+        # Dispatch email alert to doctor and confirmation email to patient after DB commit
+        def _send_async_emails():
             try:
-                from utils.email_service import send_appointment_notification_email
+                from utils.email_service import send_appointment_notification_email, send_patient_appointment_confirmation_email
                 doc_email = doc_info.get("email")
                 if doc_email:
                     send_appointment_notification_email(
@@ -320,11 +320,24 @@ def book_appointment(patient_id, doctor_id, department_id, date_str, time_str, p
                         department_name=dept_name,
                         booking_id=booking_id
                     )
+                pat_email = pat_info.get("email")
+                if pat_email:
+                    send_patient_appointment_confirmation_email(
+                        patient_email=pat_email,
+                        patient_name=pat_info["name"],
+                        appointment_for=pat_info.get("relationship_to_contact") or "Self",
+                        doctor_name=doc_info["name"],
+                        department_name=dept_name,
+                        appointment_date=str(date_obj),
+                        appointment_time=time_obj.strftime("%I:%M %p"),
+                        booking_id=booking_id,
+                        appointment_id=appt_id
+                    )
             except Exception as email_err:
-                print(f"[WARNING] Could not dispatch doctor notification email: {email_err}")
+                print(f"[WARNING] Could not dispatch appointment notification/confirmation email: {email_err}")
 
         import threading
-        threading.Thread(target=_send_async_doctor_email, daemon=True).start()
+        threading.Thread(target=_send_async_emails, daemon=True).start()
         
         return {
             "success": True,

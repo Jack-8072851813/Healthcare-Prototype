@@ -1,7 +1,7 @@
 import os
 import psycopg2
 
-def load_dotenv():
+def load_dotenv(override=True):
     """Lightweight, zero-dependency dotenv loader."""
     # Look for .env in the current file's directory or the current working directory
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +20,8 @@ def load_dotenv():
                         # Strip spaces and optional quotes
                         key = key.strip()
                         val = val.strip().strip('"').strip("'")
-                        os.environ[key] = val
+                        if override or key not in os.environ:
+                            os.environ[key] = val
             break
 
 # Load env variables on module import

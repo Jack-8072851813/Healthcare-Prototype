@@ -56,10 +56,10 @@ const DoctorDashboard: React.FC = () => {
           <div className="kpi-value">{loading ? '—' : summary?.appointments.today ?? 0}</div>
           <div className="kpi-label">Today's Appointments</div>
         </div>
-        <div className="kpi-card">
+        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => navigate('/doctor/patient-records')}>
           <div className="kpi-card-header"><div className="kpi-icon teal"><Users size={22} /></div></div>
           <div className="kpi-value">{loading ? '—' : summary?.patients.total ?? 0}</div>
-          <div className="kpi-label">My Patients</div>
+          <div className="kpi-label">Patient Records</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-header"><div className="kpi-icon amber"><Clock size={22} /></div></div>

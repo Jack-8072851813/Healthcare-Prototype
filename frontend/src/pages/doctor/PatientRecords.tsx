@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { fetchPatients, type Patient } from '../../services/dashboardApi';
-import { Eye, Search, RefreshCw } from 'lucide-react';
+import { Eye, Edit3, Search, RefreshCw } from 'lucide-react';
 
 const PatientRecords: React.FC = () => {
   const { user } = useAuth();
@@ -98,10 +98,16 @@ const PatientRecords: React.FC = () => {
                     <td>{p.city || '—'}</td>
                     <td style={{ fontSize: 12 }}>{p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}</td>
                     <td>
-                      <button className="btn btn-secondary btn-sm"
-                        onClick={() => navigate(`/doctor/patient-records/${p.id}`)}>
-                        <Eye size={14} /> View Record
-                      </button>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button className="btn btn-secondary btn-sm"
+                          onClick={() => navigate(`/doctor/patient-records/${p.id}`)}>
+                          <Eye size={14} /> View
+                        </button>
+                        <button className="btn btn-primary btn-sm"
+                          onClick={() => navigate(`/doctor/patient-records/${p.id}?edit=true`)}>
+                          <Edit3 size={14} /> Edit
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

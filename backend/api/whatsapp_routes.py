@@ -18,6 +18,8 @@ import uuid
 import json
 import hmac
 import hashlib
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -89,23 +91,40 @@ def record_whatsapp_message_id(session_id: str, msg_id: str):
         conn.close()
 
 
+import time
+from datetime import datetime, timezone, timedelta
+
 def get_or_create_whatsapp_session(whatsapp_number: str) -> str:
-    """Finds active conversation code for the whatsapp number or creates a new one."""
+    """Finds active conversation code for the whatsapp number or creates a new unique one."""
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT conversation_code FROM conversations 
+            SELECT id, conversation_code, last_message_at FROM conversations 
             WHERE whatsapp_number = %s AND conversation_status = 'ACTIVE'
             ORDER BY id DESC LIMIT 1;
         """, (whatsapp_number,))
         row = cur.fetchone()
         if row:
-            return row[0]
-            
-        # Create a new session ID if none active
-        new_session_id = f"WA_{whatsapp_number}"
-        return new_session_id
+            conv_id, conv_code, last_msg_at = row[0], row[1], row[2]
+            # Check 24-hour inactivity timeout
+            if last_msg_at:
+                now_utc = datetime.now(timezone.utc)
+                if last_msg_at.tzinfo is None:
+                    last_msg_at = last_msg_at.replace(tzinfo=timezone.utc)
+                if (now_utc - last_msg_at) > timedelta(hours=24):
+                    cur.execute("UPDATE conversations SET conversation_status = 'COMPLETED', ended_at = CURRENT_TIMESTAMP WHERE id = %s;", (conv_id,))
+                    conn.commit()
+                else:
+                    return conv_code
+
+        # Generate a unique session ID if none active
+        base_code = f"WA_{whatsapp_number}"
+        cur.execute("SELECT id FROM conversations WHERE conversation_code = %s;", (base_code,))
+        if cur.fetchone() is None:
+            return base_code
+        else:
+            return f"WA_{whatsapp_number}_{int(time.time())}"
     finally:
         cur.close()
         conn.close()
@@ -139,13 +158,14 @@ async def receive_webhook(request: Request):
     # Security Verification: Validate X-Hub-Signature-256 header using the Meta App Secret
     is_mock = whatsapp_client.is_mock_mode()
     
+    meta_app_secret = os.getenv("META_APP_SECRET")
     # In real Meta mode, App Secret is required
-    if not is_mock and not META_APP_SECRET:
+    if not is_mock and not meta_app_secret:
         print("[SECURITY] WhatsApp webhook signature validation failed: META_APP_SECRET is missing in real Meta API configuration")
         raise HTTPException(status_code=403, detail="App secret not configured")
 
     # Only validate signature if META_APP_SECRET is configured
-    if META_APP_SECRET:
+    if meta_app_secret:
         signature_header = request.headers.get("X-Hub-Signature-256")
         if not signature_header:
             print("[SECURITY] WhatsApp webhook signature validation failed: Missing X-Hub-Signature-256 header")
@@ -163,7 +183,7 @@ async def receive_webhook(request: Request):
 
         raw_body = await request.body()
         calculated_signature = hmac.new(
-            META_APP_SECRET.encode("utf-8"),
+            meta_app_secret.encode("utf-8"),
             raw_body,
             hashlib.sha256
         ).hexdigest()
@@ -249,12 +269,25 @@ async def receive_webhook(request: Request):
             whatsapp_client.send_typing_indicator(from_number)
 
             print(f"[DEBUG] Before calling AI/RAG agent. Input message: '{text_body}'")
-            # Run through Agent Core
-            agent_res = agent_service.process_agent_message(
-                conversation_code=session_id,
-                patient_code=None,
-                message_text=text_body
-            )
+            # Run agent in thread pool so async event loop is never blocked
+            loop = asyncio.get_event_loop()
+            try:
+                agent_res = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: agent_service.process_agent_message(
+                        conversation_code=session_id,
+                        patient_code=None,
+                        message_text=text_body
+                    )),
+                    timeout=25.0  # Meta expects response within 20s; give 25s max
+                )
+            except asyncio.TimeoutError:
+                print("[ERROR] Agent processing timed out after 25s")
+                agent_res = {
+                    "response": "Sorry, I'm experiencing high load right now. Please try again in a moment.",
+                    "intent": "UNKNOWN",
+                    "language": "ENGLISH",
+                    "interactive_buttons": []
+                }
             print(f"[DEBUG] After agent response is generated. Intent: {agent_res.get('intent')}, Language: {agent_res.get('language')}")
             print(f"[DEBUG] Generated response: '{agent_res.get('response')}'")
             

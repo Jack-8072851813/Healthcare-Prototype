@@ -48,16 +48,16 @@ def parse_and_normalize_date(text: str, reference_date: Optional[datetime.date] 
 
     text_clean = text.lower().strip()
 
-    # 1. Relative dates
-    if "day after tomorrow" in text_clean:
+    # 1. Relative dates (with typo tolerance for tomrmorrow, tommorow, etc.)
+    if re.search(r"day\s+after\s+tom[a-z]*row", text_clean) or re.search(r"after\s+tom[a-z]*row", text_clean):
         target = reference_date + datetime.timedelta(days=2)
         return target.strftime("%Y-%m-%d"), False, None
 
-    if "tomorrow" in text_clean:
+    if re.search(r"\btom[a-z]*row\b", text_clean) or "tomorrow" in text_clean or "tmrw" in text_clean:
         target = reference_date + datetime.timedelta(days=1)
         return target.strftime("%Y-%m-%d"), False, None
 
-    if "today" in text_clean:
+    if "today" in text_clean or "2day" in text_clean:
         return reference_date.strftime("%Y-%m-%d"), False, None
 
     # 2. Weekdays ("next monday", "this friday", "saturday")
@@ -141,7 +141,7 @@ def parse_and_normalize_date(text: str, reference_date: Optional[datetime.date] 
     return None, False, None
 
 
-def validate_dob(dob_str: str, reference_date: Optional[datetime.date] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+def validate_dob(dob_str: str, reference_date: Optional[datetime.date] = None, allow_ambiguous: bool = True) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Validates a normalized or natural DOB string.
 
@@ -155,10 +155,11 @@ def validate_dob(dob_str: str, reference_date: Optional[datetime.date] = None) -
     if err or not normalized:
         return False, None, "Invalid date format. Please use DD/MM/YYYY or specify month in words (e.g., 15 Aug 1995)."
 
-    if is_ambiguous:
+    if is_ambiguous and not allow_ambiguous:
         return False, normalized, "Ambiguous date (e.g. 05/06/1995). Please clarify if you mean 5th June or 6th May (e.g. 05 June 1995)."
 
     dob_date = datetime.datetime.strptime(normalized, "%Y-%m-%d").date()
+
 
     if dob_date > reference_date:
         return False, None, "Date of birth cannot be in the future."
