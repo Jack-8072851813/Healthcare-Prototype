@@ -9,7 +9,8 @@ POST /api/whatsapp/webhook: Webhook message delivery (text & voice)
 Step 5.3 — Real WhatsApp Channel Layer Integration
 """
 
-from fastapi import APIRouter, Query, HTTPException, Request, Response
+from fastapi import APIRouter, Query, HTTPException, Request, Response, BackgroundTasks
+
 from pydantic import BaseModel
 from typing import Optional, List
 import sys
@@ -147,8 +148,9 @@ def verify_webhook(
 
 
 @router.post("/webhook")
-async def receive_webhook(request: Request):
+async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     print("========== WEBHOOK ROUTE HIT ==========")
+
     """
     Receive incoming WhatsApp messages (text, voice, delivery logs).
     POST /api/whatsapp/webhook
@@ -268,50 +270,29 @@ async def receive_webhook(request: Request):
             whatsapp_client.mark_message_read(msg_id)
             whatsapp_client.send_typing_indicator(from_number)
 
-            print(f"[DEBUG] Before calling AI/RAG agent. Input message: '{text_body}'")
-            # Run agent in thread pool so async event loop is never blocked
-            loop = asyncio.get_event_loop()
-            try:
-                agent_res = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: agent_service.process_agent_message(
-                        conversation_code=session_id,
+            def process_and_send_reply(session_code: str, sender_num: str, message_id: str, body_text: str):
+                try:
+                    agent_res = agent_service.process_agent_message(
+                        conversation_code=session_code,
                         patient_code=None,
-                        message_text=text_body
-                    )),
-                    timeout=25.0  # Meta expects response within 20s; give 25s max
-                )
-            except asyncio.TimeoutError:
-                print("[ERROR] Agent processing timed out after 25s")
-                agent_res = {
-                    "response": "Sorry, I'm experiencing high load right now. Please try again in a moment.",
-                    "intent": "UNKNOWN",
-                    "language": "ENGLISH",
-                    "interactive_buttons": []
-                }
-            print(f"[DEBUG] After agent response is generated. Intent: {agent_res.get('intent')}, Language: {agent_res.get('language')}")
-            print(f"[DEBUG] Generated response: '{agent_res.get('response')}'")
-            
-            # Send reply (Interactive buttons if present, else standard text)
-            if agent_res.get("interactive_buttons"):
-                print(f"[DEBUG] Before calling send_button_message() to {from_number}")
-                send_res = whatsapp_client.send_button_message(from_number, agent_res["response"], agent_res["interactive_buttons"])
-            else:
-                print(f"[DEBUG] Before calling send_text_message() to {from_number}")
-                send_res = whatsapp_client.send_text_message(from_number, agent_res["response"])
+                        message_text=body_text
+                    )
+                    if agent_res.get("interactive_buttons"):
+                        send_res = whatsapp_client.send_button_message(sender_num, agent_res["response"], agent_res["interactive_buttons"])
+                    else:
+                        send_res = whatsapp_client.send_text_message(sender_num, agent_res["response"])
+                    record_whatsapp_message_id(session_code, message_id)
+                    print(f"[DEBUG] Outbound message dispatch complete for {message_id}")
+                except Exception as e:
+                    print(f"[ERROR] Background WhatsApp message dispatch failed: {e}")
 
-            print(f"[DEBUG] Complete message dispatch result: {send_res}")
-            if not send_res.get("success"):
-                print(f"[ERROR] WhatsApp outbound message failed: {send_res.get('error')}")
-
-            # Record message ID to prevent duplicate retries
-            record_whatsapp_message_id(session_id, msg_id)
+            background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, text_body)
             return {
                 "status": "success",
                 "message_id": msg_id,
-                "session_id": session_id,
-                "intent": agent_res["intent"],
-                "language": agent_res["language"]
+                "session_id": session_id
             }
+
 
         # 2. Voice/Audio Message flow
         elif msg_type == "audio":

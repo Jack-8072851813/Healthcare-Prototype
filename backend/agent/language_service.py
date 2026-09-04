@@ -199,6 +199,32 @@ def detect_language_shift(text: str) -> str:
             
     return None
 
+
+def detect_language(text: str) -> str:
+    """Detects the primary language of the user input string."""
+    if not text:
+        return "ENGLISH"
+    shift = detect_language_shift(text)
+    if shift:
+        return shift
+        
+    # Check script characters
+    if re.search(r"[\u0B80-\u0BFF]", text):
+        return "TAMIL"
+    if re.search(r"[\u0900-\u097F]", text):
+        return "HINDI"
+    if re.search(r"[\u0C00-\u0C7F]", text):
+        return "TELUGU"
+    if re.search(r"[\u0D00-\u0D7F]", text):
+        return "MALAYALAM"
+    if re.search(r"[\u0C80-\u0CFF]", text):
+        return "KANNADA"
+    if re.search(r"[\u0600-\u06FF]", text):
+        return "URDU"
+
+    return "ENGLISH"
+
+
 def translate_response(key: str, language: str = "ENGLISH", **kwargs) -> str:
     """Translates a system message key into the selected language."""
     lang = language.upper() if language else "ENGLISH"

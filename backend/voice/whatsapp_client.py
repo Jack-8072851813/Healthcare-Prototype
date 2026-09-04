@@ -160,38 +160,6 @@ def send_button_message(to_number: str, text: str, buttons: list) -> dict:
     if not buttons:
         return send_text_message(to_number, text)
 
-
-    def process_incoming_whatsapp_payload(payload: dict) -> dict:
-        """Processes incoming WhatsApp payload dictionary."""
-        from api.whatsapp_routes import get_or_create_whatsapp_session, record_whatsapp_message_id
-        import agent.agent_service as agent_service
-        entry = payload.get("entry", [])
-        if not entry:
-            return {"status": "ok", "detail": "Empty entries payload"}
-        changes = entry[0].get("changes", [])
-        if not changes:
-            return {"status": "ok", "detail": "Empty changes payload"}
-        value = changes[0].get("value", {})
-        messages = value.get("messages", [])
-        if not messages:
-            return {"status": "ok", "detail": "Status update event"}
-        
-        msg_data = messages[0]
-        from_num = msg_data.get("from")
-        msg_id = msg_data.get("id")
-        text_body = msg_data.get("text", {}).get("body", "")
-        session_id = get_or_create_whatsapp_session(from_num)
-        
-        res = agent_service.process_agent_message(session_id, None, text_body)
-        record_whatsapp_message_id(session_id, msg_id)
-        return {
-            "status": "success",
-            "message_id": msg_id,
-            "session_id": session_id,
-            "intent": res["intent"],
-            "response": res["response"]
-        }
-
     if len(buttons) > 3:
         rows = []
         for btn in buttons:

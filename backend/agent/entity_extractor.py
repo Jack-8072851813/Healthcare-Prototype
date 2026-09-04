@@ -179,7 +179,15 @@ def extract_entities(text: str) -> dict:
         entities["booking_id"] = match_bk.group(1).upper()
 
     # 2. Parse Date and Time
-    entities["appointment_date"] = parse_natural_date(text_lower)
+    parsed_date = parse_natural_date(text_lower)
+    if parsed_date:
+        try:
+            today_yr = get_current_kolkata_date().year
+            p_yr = int(parsed_date.split("-")[0])
+            if p_yr >= today_yr:
+                entities["appointment_date"] = parsed_date
+        except Exception:
+            entities["appointment_date"] = parsed_date
     entities["appointment_time"] = parse_natural_time(text_lower)
 
     # 3. Connect to DB to check for patient, doctor, and department names
@@ -232,7 +240,7 @@ def extract_entities(text: str) -> dict:
             if re.search(
                 r"\b(dermatology|dermatologist|skin|hair|scalp|rash|acne|pimple|pimples|"
                 r"eczema|psoriasis|hives|dermatitis|hair\s*fall|hair\s*loss|hairfall|"
-                r"bald|baldness|thinning\s*hair|itching|itch|allergy|skin\s*infection)\b",
+                r"bald|baldness|thinning\s*hair|itching|itch|itchy|allergy|skin\s*infection)\b",
                 text_lower
             ):
                 did = dept_by_name.get("dermatology")
@@ -249,10 +257,10 @@ def extract_entities(text: str) -> dict:
                 if did:
                     entities["department_id"] = did
 
-            # Cardiology — check before General Medicine (chest pain is emergency but also cardiology)
+            # Cardiology — check before General Medicine
             elif re.search(
                 r"\b(cardio|cardiology|cardiologist|heart|cardiac|palpitations|"
-                r"breathlessness|chest\s*tightness|blood\s*pressure|hypertension)\b",
+                r"breathlessness|chest\s*tightness|chest\s*pain|chest\s*hurts|chest\s*hurting|blood\s*pressure|hypertension)\b",
                 text_lower
             ):
                 did = dept_by_name.get("cardiology")
@@ -355,7 +363,7 @@ def map_symptom_to_department_name(text: str) -> str:
             r"hair\s*problem|hair\s*issue|hair\s*thinning|losing\s*hair|"
             r"bald|baldness|thinning|scalp|dandruff|"
             r"acne|pimple|pimples|blackhead|whitehead|"
-            r"skin|rash|itching|itch|eczema|psoriasis|"
+            r"skin|rash|itching|itch|itchy|eczema|psoriasis|"
             r"allergy|skin\s*infection|hives|dermatitis|"
             r"lesion|wound\s*healing|pigmentation|dark\s*spot|"
             r"dermatology|dermatologist)\b",
@@ -371,7 +379,7 @@ def map_symptom_to_department_name(text: str) -> str:
         ),
         # 3. CARDIOLOGY — before General Medicine (chest-related)
         (
-            r"\b(chest\s*pain|heart|cardio|cardiac|palpitations|breathlessness|"
+            r"\b(chest\s*pain|chest\s*hurts|chest\s*hurting|chest\s*ache|heart|cardio|cardiac|palpitations|breathlessness|"
             r"chest\s*tightness|blood\s*pressure|hypertension|cardiologist|cardiology)\b",
             "Cardiology"
         ),

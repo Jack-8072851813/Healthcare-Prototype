@@ -25,15 +25,31 @@ def check_medical_safety(text: str, language: str = "ENGLISH") -> str:
     Checks if the user is asking for medical diagnosis or prescription.
     If yes, returns the safety warning in their language, otherwise returns None.
     """
+    if not text:
+        return None
+
     text_lower = text.lower().strip()
-    text_clean = text_lower.replace("general medicine", "dept_gen_med")
-    
+
+    # Department variations / typos and intent phrases to exclude
+    # so "medicine" in department names doesn't trigger medical diagnosis warnings
+    DEPT_PHRASES = [
+        "general medicine", "genearl medicine", "generel medicine", "genral medicine",
+        "internal medicine", "medicine department", "dept of medicine", "doctor in medicine",
+        "doctor for medicine", "medicine doctor", "cardiology", "pediatrics", "orthopedics",
+        "dermatology", "ent", "gynecology", "neurology", "doctor availability", "check availability",
+        "book appointment"
+    ]
+
+    text_clean = text_lower
+    for phrase in DEPT_PHRASES:
+        text_clean = text_clean.replace(phrase, "")
+
     lang = language.upper() if language else "ENGLISH"
     if lang not in SAFETY_WARNINGS:
         lang = "ENGLISH"
-        
+
     for pattern in DIAGNOSIS_KEYWORDS:
         if re.search(pattern, text_clean):
             return SAFETY_WARNINGS[lang]
-            
+
     return None

@@ -20,6 +20,7 @@ def get_default_state():
         "patient_type": None,
         "language": "ENGLISH",
         "intent": "GREETING",
+        "conversation_state": "GREETING",
         # Booking / department context
         "entities": {
             "patient_id": None,
@@ -28,7 +29,8 @@ def get_default_state():
             "appointment_date": None,
             "appointment_time": None,
             "booking_id": None,
-            "reason": None
+            "reason": None,
+            "symptoms": []
         },
         # Convenience resolved labels (populated during booking flow)
         "department_name": None,

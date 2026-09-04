@@ -110,6 +110,25 @@ def parse_and_normalize_date(text: str, reference_date: Optional[datetime.date] 
             except ValueError:
                 return None, False, "Invalid calendar date"
 
+    # Textual months without year: "September 5th", "5th September", "September 5"
+    pattern_text_noyear = r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\b|\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\b"
+    match_noyear = re.search(pattern_text_noyear, text_clean)
+    if match_noyear:
+        g = match_noyear.groups()
+        if g[0] is not None:
+            day_num, month_name = int(g[0]), g[1]
+        else:
+            month_name, day_num = g[2], int(g[3])
+        if month_name in MONTH_MAP:
+            m = MONTH_MAP[month_name]
+            y_val = reference_date.year
+            try:
+                target = datetime.date(y_val, m, day_num)
+                return target.strftime("%Y-%m-%d"), False, None
+            except ValueError:
+                pass
+
+
     # 5. Short numeric formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY
     match_short = re.search(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b", text_clean)
     if match_short:
@@ -167,5 +186,40 @@ def validate_dob(dob_str: str, reference_date: Optional[datetime.date] = None, a
     age = reference_date.year - dob_date.year - ((reference_date.month, reference_date.day) < (dob_date.month, dob_date.day))
     if age > 120:
         return False, None, "Please provide a valid date of birth."
+
+    return True, normalized, None
+
+
+def validate_appointment_date(date_str: str, reference_date: Optional[datetime.date] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Validates an appointment date string against reference date (today in Kolkata timezone).
+    Rejects dates in the past.
+
+    Returns:
+        (is_valid, normalized_yyyy_mm_dd, error_reason)
+    """
+    if not date_str:
+        return False, None, "No date provided."
+
+    if reference_date is None:
+        reference_date = get_current_kolkata_date()
+
+    normalized, is_ambiguous, err = parse_and_normalize_date(date_str, reference_date)
+    if err or not normalized:
+        return False, None, err or "Invalid date format."
+
+    try:
+        appt_date = datetime.datetime.strptime(normalized, "%Y-%m-%d").date()
+    except Exception:
+        return False, None, "Invalid date format."
+
+    if appt_date < reference_date:
+        return False, normalized, (
+            "That date has already passed. Please select a future appointment date.\n\n"
+            "Available options include:\n"
+            "• Today\n"
+            "• Tomorrow\n"
+            "• Another future date"
+        )
 
     return True, normalized, None
