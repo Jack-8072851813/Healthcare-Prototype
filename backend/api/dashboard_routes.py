@@ -868,6 +868,8 @@ def validate_phone_number(phone: Optional[str], required: bool = True) -> Option
     digits = re.sub(r"\D", "", phone)
     if len(digits) == 12 and digits.startswith("91"):
         digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
     if len(digits) != 10:
         raise HTTPException(status_code=400, detail=f"Invalid phone number '{phone}'. Phone number must contain exactly 10 digits.")
     return digits
@@ -877,8 +879,7 @@ def validate_phone_number(phone: Optional[str], required: bool = True) -> Option
 def create_doctor(body: NewDoctorRequest, admin_user: dict = Depends(require_admin)):
     """
     Create a new doctor. Admin only.
-    Creates both a doctor record and a user account (role=DOCTOR) in one transaction.
-    Dispatches welcome email to exact registered email.
+    Creates doctor record, user account, default 7-day working schedule, and dispatches welcome email.
     """
     conn = None
     try:
@@ -895,17 +896,21 @@ def create_doctor(body: NewDoctorRequest, admin_user: dict = Depends(require_adm
         conn = get_conn()
         cur = conn.cursor()
 
-        # 1. Check username is not already taken
+        # 1. Check username is not already taken in users
         cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s);", (clean_username,))
         if cur.fetchone():
-            raise HTTPException(status_code=400, detail=f"Username '{clean_username}' is already taken.")
+            raise HTTPException(status_code=400, detail=f"Username '{clean_username}' is already taken. Please choose another username.")
 
         # 2. Check department exists
         cur.execute("SELECT id FROM departments WHERE id = %s;", (body.department_id,))
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail=f"Department ID {body.department_id} not found.")
 
-        # 3. Check email uniqueness in doctors
+        # 3. Check email uniqueness in users and doctors tables
+        cur.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(%s);", (clean_email,))
+        if cur.fetchone():
+            raise HTTPException(status_code=400, detail=f"Email '{clean_email}' is already registered to a user account.")
+
         cur.execute("SELECT id FROM doctors WHERE LOWER(email) = LOWER(%s);", (clean_email,))
         if cur.fetchone():
             raise HTTPException(status_code=400, detail=f"Email '{clean_email}' is already in use by another doctor.")
@@ -957,6 +962,20 @@ def create_doctor(body: NewDoctorRequest, admin_user: dict = Depends(require_adm
         )
         doctor_id = cur.fetchone()[0]
 
+        # 9. Auto-create default 7-day active working schedules (Mon-Sun, 09:00 - 17:00, 30 min slots)
+        days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+        today_date = date.today().isoformat()
+        for day in days:
+            cur.execute(
+                """
+                INSERT INTO doctor_schedules (
+                    doctor_id, day_of_week, start_time, end_time,
+                    slot_duration_minutes, effective_from, status, created_at, updated_at
+                ) VALUES (%s, %s, '09:00'::time, '17:00'::time, 30, %s, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+                """,
+                (doctor_id, day, today_date)
+            )
+
         conn.commit()
         cur.close()
 
@@ -967,7 +986,8 @@ def create_doctor(body: NewDoctorRequest, admin_user: dict = Depends(require_adm
                 doctor_email=clean_email,
                 doctor_name=display_name,
                 username=clean_username,
-                password=body.password
+                password=body.password,
+                doctor_id=doctor_id
             )
         except Exception as email_err:
             print(f"[WARNING] Could not dispatch welcome email: {email_err}")
@@ -1034,6 +1054,10 @@ def admin_update_doctor(doctor_id: int, body: AdminUpdateDoctorRequest, admin_us
 
         # Check email unique if changed
         if clean_email:
+            cur.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(%s) AND id != %s;", (clean_email, user_id))
+            if cur.fetchone():
+                raise HTTPException(status_code=400, detail=f"Email '{clean_email}' is already registered to another user account.")
+
             cur.execute("SELECT id FROM doctors WHERE LOWER(email) = LOWER(%s) AND id != %s;", (clean_email, doctor_id))
             if cur.fetchone():
                 raise HTTPException(status_code=400, detail=f"Email '{clean_email}' is already in use by another doctor.")

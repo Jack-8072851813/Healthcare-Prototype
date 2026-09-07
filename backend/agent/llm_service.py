@@ -44,7 +44,7 @@ def _call_gemini_api(prompt: str) -> Optional[str]:
         "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}
     }
     try:
-        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=8)
+        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=2.5)
         res.raise_for_status()
         data = res.json()
         candidates = data.get("candidates", [])

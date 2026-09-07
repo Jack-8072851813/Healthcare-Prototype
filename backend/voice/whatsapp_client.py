@@ -153,12 +153,18 @@ def send_text_message(to_number: str, text: str) -> dict:
 def send_button_message(to_number: str, text: str, buttons: list) -> dict:
     """
     Sends a Meta WhatsApp interactive button message.
-    Meta API strictly limits reply buttons to max 3 items.
+    Meta API strictly limits reply buttons to max 3 items, and body text to 1024 chars.
     If 'buttons' contains > 3 items, converts to interactive list message.
+    If text length > 1000 chars, sends full text first then short menu caption.
     """
     to_number = clean_whatsapp_number(to_number)
     if not buttons:
         return send_text_message(to_number, text)
+
+    # Meta interactive body text limit: max 1024 chars
+    if len(text) > 1000:
+        send_text_message(to_number, text)
+        text = "Please choose an option below:"
 
     if len(buttons) > 3:
         rows = []
@@ -210,14 +216,20 @@ def send_button_message(to_number: str, text: str, buttons: list) -> dict:
         res.raise_for_status()
         return {"success": True, "response": res.json()}
     except Exception as e:
-        log_outbound_simulation("interactive_button", to_number, payload)
-        return {"success": True, "message_id": f"wam.mock_button_{uuid.uuid4().hex[:12]}", "fallback": True}
+        print(f"[ERROR] send_button_message failed: {e}. Falling back to send_text_message.")
+        return send_text_message(to_number, text)
 
 
 def send_list_message(to_number: str, text: str, button_label: str, sections: list) -> dict:
     """
     Sends a Meta WhatsApp interactive list message.
+    Meta API limits body text to 1024 chars.
     """
+    to_number = clean_whatsapp_number(to_number)
+    if len(text) > 1000:
+        send_text_message(to_number, text)
+        text = "Please choose an option below:"
+
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
@@ -249,10 +261,8 @@ def send_list_message(to_number: str, text: str, button_label: str, sections: li
         res.raise_for_status()
         return {"success": True, "response": res.json()}
     except Exception as e:
-        log_outbound_simulation("interactive_list", to_number, payload)
-        return {"success": True, "message_id": f"wam.mock_list_{uuid.uuid4().hex[:12]}", "fallback": True}
-        log_outbound_simulation("interactive_list", to_number, payload)
-        return {"success": True, "message_id": f"wam.mock_list_{uuid.uuid4().hex[:12]}", "fallback": True}
+        print(f"[ERROR] send_list_message failed: {e}. Falling back to send_text_message.")
+        return send_text_message(to_number, text)
 
 
 

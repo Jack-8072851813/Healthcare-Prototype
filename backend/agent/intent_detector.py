@@ -108,12 +108,12 @@ PATTERNS = {
 
     # ---- DEPENDENT_PATIENT ----
     "DEPENDENT_PATIENT": [
-        r"\b(for\s*my\s*(son|daughter|child|kid|baby|wife|husband|mother|father|mom|dad|spouse|"
+        r"\b(for\s*my\s*(son|sonn|daughter|daughtr|daugter|doughter|daugther|child|chld|kid|kd|baby|wife|husband|mother|father|mom|dad|spouse|"
         r"parent|sister|brother|relative|family\s*member|dependent)|"
-        r"my\s*(son|daughter|child|kid|wife|husband|mother|father|mom|dad)\s*(has|have|is|needs|want|would)|"
-        r"book\s*(for|an\s*appointment\s*for)\s*my\s*(son|daughter|child|wife|husband|mother|father|mom|dad)|"
-        r"appointment\s*for\s*my\s*(son|daughter|child|wife|husband|mother|father)|"
-        r"(son|daughter|child)\s*(has|have)\s*(fever|cough|cold|pain|illness|problem|issue|sick))\b",
+        r"my\s*(son|sonn|daughter|daughtr|daugter|doughter|daugther|child|chld|kid|kd|wife|husband|mother|father|mom|dad)\s*(has|have|is|needs|want|would)|"
+        r"(book|bok)\s*(for|an?\s*appoin?t?m?e?n?t?\s*for)\s*my\s*(son|sonn|daughter|daughtr|daugter|doughter|daugther|child|chld|wife|husband|mother|father|mom|dad)|"
+        r"appoin?t?m?e?n?t?\s*for\s*my\s*(son|sonn|daughter|daughtr|daugter|doughter|daugther|child|chld|wife|husband|mother|father)|"
+        r"(son|sonn|daughter|daughtr|daugter|doughter|child|chld)\s*(has|have)\s*(fever|fevr|cough|couggh|cold|cld|pain|payn|payning|illness|problem|issue|sick))\b",
         r"(என்\s*மகன்|என்\s*மகள்|என்\s*குழந்தை|என்\s*மனைவி|என்\s*கணவன்)",
         r"(मेरे\s*बेटे|मेरी\s*बेटी|मेरे\s*बच्चे|मेरी\s*पत्नी|मेरे\s*पति)",
         r"(నా\s*కొడుకు|నా\s*కూతురు|నా\s*పిల్ల|నా\s*భార్య|నా\s*భర్త)",
@@ -124,8 +124,8 @@ PATTERNS = {
 
     # ---- CANCEL_APPOINTMENT ----
     "CANCEL_APPOINTMENT": [
-        r"\b(cancel|cancellation|discard|delete\s*appointment|cancel\s*booking|cancel\s*my\s*appointment|"
-        r"i\s*want\s*to\s*cancel|please\s*cancel)\b",
+        r"\b(cancel|cancle|cancl|cancellation|discard|delete\s*appoin?t?m?e?n?t?|cancel\s*booking|cancle\s*booking|cancel\s*my\s*appoin?t?m?e?n?t?|cancle\s*my\s*appoin?t?m?e?n?t?|"
+        r"i\s*want\s*to\s*cancel|please\s*cancel|cancle\s*appoin?t?m?e?n?t?)\b",
         r"(ரத்து|நீக்கு)",
         r"(रद्द|निरस्त|कैंसिल)",
         r"(రద్దు|తీసివేయి)",
@@ -136,9 +136,9 @@ PATTERNS = {
 
     # ---- RESCHEDULE_APPOINTMENT ----
     "RESCHEDULE_APPOINTMENT": [
-        r"\b(reschedule|postpone|change\s*date|change\s*time|shift\s*appointment|modify\s*appointment|"
-        r"change\s*my\s*appointment|move\s*appointment|change\s*to\s*tomorrow|change\s*to\s*monday|"
-        r"i\s*want\s*to\s*reschedule|can\s*i\s*reschedule)\b",
+        r"\b(reschedule|reschedul|reshdule|reshedul|postpone|change\s*date|change\s*time|shift\s*appoin?t?m?e?n?t?|modify\s*appoin?t?m?e?n?t?|"
+        r"change\s*my\s*appoin?t?m?e?n?t?|move\s*appoin?t?m?e?n?t?|change\s*to\s*tomorrow|change\s*to\s*monday|"
+        r"i\s*want\s*to\s*reschedule|can\s*i\s*reschedule|reschedul\s*my\s*appoin?t?m?e?n?t?)\b",
         r"(மாற்ற|தேதி\s*மாற்ற|நேரம்\s*மாற்ற)",
         r"(तारीख\s*बदलें|समय\s*बदलें|बदलाव|रिशेड्यूल)",
         r"(మార్చడం|తేదీ\s*మార్చండి)",
@@ -225,12 +225,12 @@ PATTERNS = {
 
     # ---- BOOK_APPOINTMENT ----
     "BOOK_APPOINTMENT": [
-        r"\b(book|appointment|booking|need\s*(an?\s*)?appointment|schedule\s*appointment|"
-        r"consult(ation)?|see\s*a\s*doctor|want\s*to\s*(see|meet)\s*(a\s*)?doctor|"
-        r"i\s*(need|want|would\s*like)\s*(to\s*)?(see|visit|consult|meet)\s*(a\s*)?doctor|"
-        r"i\s*have\s*(hair|skin|fever|cough|cold|pain|problem|issue|rash|acne|"
+        r"\b(book|bok|bokk|appointment|appoinment|appintment|booking|need\s*(an?\s*)?appoin?t?m?e?n?t?|schedule\s*appoin?t?m?e?n?t?|"
+        r"consult(ation)?|see\s*a\s*doctor|want\s*to\s*(see|meet|bok)\s*(a\s*)?doctor|"
+        r"i\s*(need|want|would\s*like)\s*(to\s*)?(see|visit|consult|meet|bok)\s*(a\s*)?doctor|"
+        r"i\s*have\s*(hair|skin|skinn|fever|fevr|cough|couggh|cold|cld|pain|payn|payning|problem|issue|rash|acne|"
         r"hair\s*fall|hair\s*loss|losing\s*hair|bald|headache|migraine|"
-        r"chest|joint|ear|eye|stomach|back)\b|"
+        r"chest|joint|ear|nose|nos|eye|stomach|back)\b|"
         r"slot|slots|free\s*slot|cardiologist|cardiology|heart\s*doctor|heart\s*specialist|"
         r"pediatrician|neurologist|gynecologist|orthopedist|dermatologist|physician|"
         r"i\s*need\s*a\s*(dermatologist|cardiologist|pediatrician|neurologist|"

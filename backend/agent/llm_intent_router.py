@@ -226,7 +226,7 @@ def _call_gemini(prompt: str) -> Optional[str]:
                 attempt_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=10,
+                timeout=2.5,
                 verify=verify_ssl,
             )
             if res.status_code == 404 and attempt_model != "gemini-1.5-flash-latest":
@@ -301,6 +301,9 @@ def _build_prompt(
 ) -> str:
     """
     Builds the complete structured prompt for the LLM Intent Router.
+    Enforces the grounding extraction contract: every non-null entity
+    must be accompanied by a *_raw_quote field containing the exact
+    substring from the CURRENT user message that supports it.
     """
     now_str       = _get_ist_datetime_str()
     today_str     = _get_ist_date_str()
@@ -344,6 +347,7 @@ def _build_prompt(
         "previous_question":   prev_question,
         "booking_stage":       booking_stage,
         "last_bot_message":    last_bot_msg,
+        "pending_stage":       booking_stage,
     }, ensure_ascii=False)
 
     tomorrow_str = (_get_ist_now().date() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
@@ -351,15 +355,52 @@ def _build_prompt(
     prompt = f"""You are the Patient Intent Router for Meridian Hospital's AI Patient Desk.
 Your ONLY job is to classify the patient's intent and extract structured entities from their message.
 
-CRITICAL RULES — you MUST follow these:
+=== GROUNDING CONTRACT — MANDATORY ===
+You MUST NOT infer, assume, or invent any field. Every non-null entity you extract
+(doctor_name, appointment_date, appointment_time, medical_reason, patient_name)
+MUST be accompanied by a *_raw_quote field containing the EXACT substring or
+clear paraphrase from the CURRENT user message that supports it.
+
+RULES FOR EACH FIELD:
+1. medical_reason / condition:
+   - ONLY extract if the patient describes a symptom or medical reason in THIS message.
+   - NEVER put a doctor's name, department name, or intent label (e.g. "Book Appointment") into this field.
+   - If no symptom is mentioned in THIS message → set medical_reason=null.
+
+2. doctor_name:
+   - ONLY if the patient explicitly names a specific doctor in THIS message (e.g. "I want Dr. Arun").
+   - NEVER invent, infer, or suggest a doctor name. Department routing only.
+   - If not explicitly mentioned → doctor_name=null.
+
+3. appointment_date:
+   - ONLY if the patient mentions a date or relative day ("tomorrow", "Friday", "next Monday") in THIS message.
+   - Convert relative dates using today={today_str}.
+   - If no date in THIS message and pending_stage is AWAITING_DATE, you may interpret a short reply as the date answer.
+   - Otherwise → appointment_date=null.
+
+4. appointment_time:
+   - ONLY if the patient mentions a time ("5 PM", "morning", "10:30") in THIS message.
+   - If pending_stage is AWAITING_TIME, a short reply ("morning", "5", "PM") may be the time answer.
+   - Otherwise → appointment_time=null.
+
+5. patient_name:
+   - ONLY if the patient explicitly provides their name in THIS message.
+   - Must look like a real human name (at least 2 letters, not just digits or garbage).
+   - Otherwise → patient_name=null.
+
+6. NEVER carry forward values from history silently — if a prior turn had a date and this turn does not mention it, output null for appointment_date.
+   Exception: if pending_stage matches (e.g. AWAITING_DATE, AWAITING_TIME, AWAITING_BOOKING_ID) and this message is a direct answer, you may extract from the answer.
+7. If pending_stage is AWAITING_BOOKING_ID, the bot explicitly asked the patient for their booking ID (e.g., APT10001). A short reply or alphanumeric reply is expected to be the booking ID answer. Do NOT reclassify into BOOK_APPOINTMENT or DOCTOR_AVAILABILITY unless the user explicitly requests a different command.
+
+=== END GROUNDING CONTRACT ===
+
+CRITICAL RULES:
 1. DO NOT select, suggest, or invent any doctor name. Only extract the appropriate medical department.
 2. DO NOT write to any database. You are a classification and extraction service only.
-3. All extracted patient information will be validated by downstream deterministic services before any DB insertion.
-4. If intent confidence is low or required information is ambiguous, return needs_clarification=true and provide a helpful clarification_question.
-5. For DOB: if the numeric date is ambiguous (e.g. 08/09/2004 where both parts ≤ 12), set dob_is_ambiguous=true and do NOT guess.
-6. For natural-language dates like "tomorrow", "next Monday", "Friday" — convert them using the current IST date below.
-7. For short follow-up messages ("tomorrow", "5 PM", "yes", "cancel it") — interpret them using the conversation state below. Do NOT restart the conversation.
-8. Handle spelling mistakes gracefully (e.g. "faver" = fever, "hair faling" = hair loss).
+3. If intent confidence is low or required information is ambiguous, return needs_clarification=true.
+4. For DOB: if the numeric date is ambiguous (e.g. 08/09/2004 where both parts ≤ 12), set dob_is_ambiguous=true and do NOT guess.
+5. Handle spelling mistakes gracefully (e.g. "faver" = fever, "hair faling" = hair loss).
+6. For GREETING messages with no medical content → return GREETING intent, all entity fields null.
 
 CURRENT DATE & TIME (IST): {now_str}  ({weekday_str})
 TODAY: {today_str}
@@ -387,14 +428,14 @@ SYMPTOM → DEPARTMENT SEMANTIC MAPPING (use semantic understanding, not just ke
 SUPPORTED INTENTS (return exactly one):
 - GREETING: Hello, hi, good morning, any opening message
 - PATIENT_REGISTRATION: New patient wanting to register, first-time visitor
-- PATIENT_DETAILS: Patient asking for personal details, patient ID, profile info ("tell me my details", "my patient ID", "show my info", "what details do you have about me")
-- BOOK_APPOINTMENT: Booking a doctor appointment for symptoms, consultation, checkup ("I want an appointment", "book doctor", "need doctor for fever")
-- DOCTOR_AVAILABILITY: Asking which doctors or slots are available ("which doctors are available?", "who is available tomorrow?", "any dermatologist available?")
-- CANCEL_APPOINTMENT: Wants to cancel an existing appointment ("cancel my appointment", "I cannot come tomorrow")
-- RESCHEDULE_APPOINTMENT: Wants to move/change date or time of existing appointment ("change my appointment", "move it to Friday")
+- PATIENT_DETAILS: Patient asking for personal details, patient ID, profile info
+- BOOK_APPOINTMENT: Booking a doctor appointment for symptoms, consultation, checkup
+- DOCTOR_AVAILABILITY: Asking which doctors or slots are available
+- CANCEL_APPOINTMENT: Wants to cancel an existing appointment
+- RESCHEDULE_APPOINTMENT: Wants to move/change date or time of existing appointment
 - HOSPITAL_INFORMATION: Hospital location, address, timing, departments, contact info
 - APPOINTMENT_CONFIRMATION: Patient confirms a pending appointment booking ("yes", "confirm", "ok", "proceed")
-- APPOINTMENT_STATUS: Checking status of a booked appointment ("what is my appointment?", "my booking", "show my appointment")
+- APPOINTMENT_STATUS: Checking status of a booked appointment
 - PATIENT_DETAILS_UPDATE: Updating personal info (name, phone, DOB, email)
 - DEPENDENT_BOOKING: Booking for a family member (son, daughter, wife, husband, mother, father, child)
 - EMERGENCY: Chest pain, severe difficulty breathing, sudden stroke, heavy bleeding, life-threatening emergency
@@ -407,7 +448,7 @@ SUPPORTED INTENTS (return exactly one):
 CONVERSATION HISTORY (last 6 turns):
 {history_ctx}
 
-CURRENT CONVERSATION STATE:
+CURRENT CONVERSATION STATE (including pending_stage — the question the bot just asked):
 {state_summary}
 
 PATIENT'S MESSAGE:
@@ -415,31 +456,36 @@ PATIENT'S MESSAGE:
 
 INSTRUCTIONS:
 - Use the conversation state and history to resolve ambiguous short messages.
-- If prior_intent is BOOK_APPOINTMENT and patient says "tomorrow", extract appointment_date=tomorrow's date.
+- If pending_stage=AWAITING_DATE and patient says "tomorrow", extract appointment_date=tomorrow's date with date_raw_quote="tomorrow".
+- If pending_stage=AWAITING_BOOKING_ID, keep intent as APPOINTMENT_STATUS or CANCEL_APPOINTMENT and do not switch to BOOK_APPOINTMENT.
 - If confirmation_pending=true and patient says "yes"/"ok"/"sure", return intent=APPOINTMENT_CONFIRMATION.
-- If prior_intent is BOOK_APPOINTMENT and patient says "cancel", return intent=CANCEL_APPOINTMENT.
 - For DEPENDENT_BOOKING: extract relationship (SON/DAUGHTER/CHILD/SPOUSE/MOTHER/FATHER/SIBLING) and booking_for=DEPENDENT.
-- For appointment_time: accept natural language ("morning"→"MORNING", "afternoon"→"AFTERNOON", "evening"→"EVENING", "10 AM"→"10:00", "5 PM"→"17:00", "10:30"→"10:30").
+- For appointment_time: accept natural language ("morning"→"MORNING", "afternoon"→"AFTERNOON", "evening"→"EVENING", "10 AM"→"10:00", "5 PM"→"17:00").
 - For appointment_date: resolve relative dates to YYYY-MM-DD using today={today_str}.
-- If patient mentions BOTH symptoms AND a date/time in one message, extract all of them.
+- For a pure greeting ("Good morning", "Hi", "Hello") with no medical content: intent=GREETING, all entity fields=null.
 
 Return ONLY a JSON object with these exact fields (no explanation, no markdown):
 {{
   "intent": "<one of the supported intents above>",
   "confidence": <float 0.0-1.0>,
   "symptoms": [<list of symptom strings, or []>],
-  "medical_reason": "<string or null>",
+  "medical_reason": "<symptom/visit-reason extracted from THIS message, or null>",
+  "reason_raw_quote": "<exact substring from THIS message that supports medical_reason, or null>",
   "department": "<department name from the list above, or null>",
-  "doctor_name": "<doctor name string ONLY if patient explicitly requested a specific doctor by name, otherwise null>",
+  "doctor_name": "<doctor name ONLY if patient explicitly requested a specific doctor in THIS message, otherwise null>",
+  "doctor_raw_quote": "<exact substring from THIS message that supports doctor_name, or null>",
   "patient_type": "EXISTING" | "FIRST_TIME" | null,
   "booking_for": "SELF" | "CHILD" | "FAMILY_MEMBER" | null,
   "relationship": "SON" | "DAUGHTER" | "CHILD" | "SPOUSE" | "MOTHER" | "FATHER" | "SIBLING" | "DEPENDENT" | null,
-  "patient_name": "<string or null>",
+  "patient_name": "<patient name ONLY if explicitly given in THIS message, or null>",
+  "patient_name_raw_quote": "<exact substring from THIS message that supports patient_name, or null>",
   "date_of_birth": "<YYYY-MM-DD or null>",
   "dob_is_ambiguous": <true | false>,
   "gender": "Male" | "Female" | "Other" | null,
-  "appointment_date": "<YYYY-MM-DD or null>",
-  "appointment_time": "<HH:MM (24h) or MORNING/AFTERNOON/EVENING/NIGHT or null>",
+  "appointment_date": "<YYYY-MM-DD ONLY if date mentioned in THIS message, or null>",
+  "date_raw_quote": "<exact substring from THIS message that supports appointment_date, or null>",
+  "appointment_time": "<HH:MM (24h) or MORNING/AFTERNOON/EVENING/NIGHT ONLY if time in THIS message, or null>",
+  "time_raw_quote": "<exact substring from THIS message that supports appointment_time, or null>",
   "needs_clarification": <true | false>,
   "clarification_question": "<question to ask patient, or null>",
   "missing_fields": [<list of field names still needed, or []>],
@@ -447,22 +493,19 @@ Return ONLY a JSON object with these exact fields (no explanation, no markdown):
   "emergency": <true | false>
 }}
 
-EXAMPLES:
+EXAMPLES (showing raw_quote usage):
 
 Patient: "I have fever and cough. I want to see a doctor tomorrow morning."
-Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.98,"symptoms":["fever","cough"],"medical_reason":"fever and cough","department":"General Medicine","doctor_name":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":"{tomorrow_str}","appointment_time":"MORNING","needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
+Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.98,"symptoms":["fever","cough"],"medical_reason":"fever and cough","reason_raw_quote":"fever and cough","department":"General Medicine","doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":"{tomorrow_str}","date_raw_quote":"tomorrow","appointment_time":"MORNING","time_raw_quote":"morning","needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
 
-Patient: "I have hair falling."
-Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.97,"symptoms":["hair loss"],"medical_reason":"hair falling","department":"Dermatology","doctor_name":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"appointment_time":null,"needs_clarification":false,"clarification_question":null,"missing_fields":["appointment_date","appointment_time"],"language":"ENGLISH","emergency":false}}
+Patient: "Good morning" (with prior booking context in state)
+Response: {{"intent":"GREETING","confidence":0.99,"symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":null,"relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
 
-Patient: "I want to book an appointment for my son, he has fever."
-Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.98,"symptoms":["fever"],"medical_reason":"fever","department":"Pediatrics","doctor_name":null,"patient_type":null,"booking_for":"CHILD","relationship":"SON","patient_name":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"appointment_time":null,"needs_clarification":false,"clarification_question":null,"missing_fields":["appointment_date"],"language":"ENGLISH","emergency":false}}
-
-Patient: "I want Dr. Arun Kumar"
-Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.99,"symptoms":[],"medical_reason":null,"department":null,"doctor_name":"Dr. Arun Kumar","patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"appointment_time":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
+Patient: "I have hair problems for that which doctor is available"
+Response: {{"intent":"DOCTOR_AVAILABILITY","confidence":0.85,"symptoms":["hair problems"],"medical_reason":"hair problems","reason_raw_quote":"hair problems","department":"Dermatology","doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":["appointment_date"],"language":"ENGLISH","emergency":false}}
 
 Patient: "asdfghjkl"
-Response: {{"intent":"UNKNOWN","confidence":0.10,"symptoms":[],"medical_reason":null,"department":null,"doctor_name":null,"patient_type":null,"booking_for":null,"relationship":null,"patient_name":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"appointment_time":null,"needs_clarification":true,"clarification_question":"I'm sorry, I didn't understand that. Could you please tell me how I can help you today? For example: booking an appointment, doctor availability, or hospital information.","missing_fields":[],"language":"ENGLISH","emergency":false}}
+Response: {{"intent":"UNKNOWN","confidence":0.10,"symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":null,"relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":true,"clarification_question":"I'm sorry, I didn't understand that. Could you please tell me how I can help you today? For example: booking an appointment, doctor availability, or hospital information.","missing_fields":[],"language":"ENGLISH","emergency":false}}
 """
     return prompt
 
@@ -642,23 +685,34 @@ def _validate_and_normalise(parsed: dict, message_text: str, current_state: dict
     # --- Emergency flag ---
     emergency = bool(parsed.get("emergency", False))
 
+    # --- Pass through raw_quote fields for grounding_validator ---
+    def _clean_quote(q) -> Optional[str]:
+        if not q or str(q).strip().lower() in ("null", "none", ""):
+            return None
+        return str(q).strip()
+
     res_dict = {
         "intent":                intent,
         "confidence":            confidence,
         "symptoms":              symptoms,
         "medical_reason":        med_reason,
+        "reason_raw_quote":      _clean_quote(parsed.get("reason_raw_quote")),
         "department":            dept,
         "doctor_name":           doc_name,
+        "doctor_raw_quote":      _clean_quote(parsed.get("doctor_raw_quote")),
         "doctor_preference":     doc_name,  # for backward compatibility
         "patient_type":          pat_type,
         "booking_for":           booking_for,
         "relationship":          relationship,
         "patient_name":          parsed.get("patient_name"),
+        "patient_name_raw_quote": _clean_quote(parsed.get("patient_name_raw_quote")),
         "date_of_birth":         dob,
         "dob_is_ambiguous":      dob_is_ambiguous,
         "gender":                parsed.get("gender"),
         "appointment_date":      appointment_date,
+        "date_raw_quote":        _clean_quote(parsed.get("date_raw_quote")),
         "appointment_time":      appointment_time,
+        "time_raw_quote":        _clean_quote(parsed.get("time_raw_quote")),
         "needs_clarification":   needs_clarification,
         "clarification_question": clarification_question,
         "missing_fields":        missing_fields,
@@ -734,22 +788,70 @@ def _rule_based_fallback(
             try:
                 cur.execute("SELECT id, display_name FROM doctors WHERE status = 'ACTIVE';")
                 for d_id, d_name in cur.fetchall():
-                    d_clean = d_name.lower().replace("dr.", "").replace("dr", "").strip()
-                    if d_clean and len(d_clean) > 2 and d_clean in msg_lower:
-                        doc_pref = d_name
-                        rule_result["doctor_id"] = d_id
+                    parts = re.findall(r"\b\w+\b", d_name.lower())
+                    for p in parts:
+                        if len(p) > 2 and p not in ["dr", "dr.", "kumar", "ramesh", "mr", "mrs", "ms"]:
+                            if re.search(r"\b" + re.escape(p) + r"\b", msg_lower):
+                                doc_pref = d_name
+                                rule_result["doctor_id"] = d_id
+                                break
+                    if doc_pref:
                         break
             finally:
                 cur.close()
                 conn.close()
 
-        if any(p in msg_lower for p in ["my personal details", "personal details", "tell my details", "show my details", "my patient profile", "my patient id", "patient id", "what is my id", "tell me my patient id", "my patient code", "my details", "patient information", "show details", "tell details", "what are my details", "show my DOB", "registered information"]):
+        # Detect: "my son details", "son's profile", "my daughter details", "dependent details", etc.
+        _dep_detail_kws = [
+            "son detail", "son's detail", "my son detail", "son profile", "son information", "son info",
+            "daughter detail", "daughter's detail", "my daughter detail", "daughter profile", "daughter information",
+            "child detail", "child's detail", "my child detail", "child profile", "dependent detail",
+            "family member detail", "wife detail", "husband detail", "mother detail", "father detail",
+            "show my son", "tell my son", "show son", "tell son", "son data", "daughter data",
+            "my family member detail", "family detail"
+        ]
+        _dep_detail_hit = any(p in msg_lower for p in _dep_detail_kws)
+
+        if any(p in msg_lower for p in ["my personal details", "personal details", "tell my details", "show my details", "my patient profile", "my patient id", "patient id", "what is my id", "tell me my patient id", "my patient code", "my details", "patient information", "show details", "tell details", "what are my details", "show my DOB", "registered information"]) or _dep_detail_hit:
             canonical_intent = "PATIENT_DETAILS"
             dept = None
             doc_pref = None
+            if _dep_detail_hit:
+                rule_result["query_for_dependent"] = True
+                # Try to extract the dependent's name from the message
+                # e.g. "Aron's details" → "Aron", "tell me my son Aron details" → "Aron"
+                import re as _re
+                _name_match = _re.search(
+                    r"(?:my son|my daughter|my child|my wife|my husband|my mother|my father|for)\s+([A-Z][a-z]+)",
+                    message_text, _re.IGNORECASE
+                ) or _re.search(
+                    r"([A-Z][a-z]+)(?:'s|s)?\s+(?:detail|profile|information|data)",
+                    message_text, _re.IGNORECASE
+                )
+                if _name_match:
+                    rule_result["dependent_name_hint"] = _name_match.group(1).strip()
 
-        if canonical_intent == "UNKNOWN" and (dept or doc_pref or rule_result.get("doctor_id")):
-            canonical_intent = "BOOK_APPOINTMENT"
+        # Detect relationship context statements like "Aron is my son" — store context, don't book
+        _rel_context_patterns = [
+            r"\b(\w+)\s+is\s+my\s+(son|daughter|child|wife|husband|mother|father|brother|sister)\b",
+            r"\bmy\s+(son|daughter|child)'?s?\s+name\s+is\s+(\w+)\b",
+        ]
+        for _pat in _rel_context_patterns:
+            import re as _re2
+            _m = _re2.search(_pat, msg_lower)
+            if _m:
+                canonical_intent = "PATIENT_DETAILS"
+                rule_result["relationship_context_only"] = True
+                rule_result["query_for_dependent"] = True
+                dept = None
+                doc_pref = None
+                break
+
+        if canonical_intent in ("UNKNOWN", "GREETING") and (dept or doc_pref or rule_result.get("doctor_id")):
+            if current_state.get("intent") == "DOCTOR_AVAILABILITY":
+                canonical_intent = "DOCTOR_AVAILABILITY"
+            else:
+                canonical_intent = "BOOK_APPOINTMENT"
         if any(p in msg_lower for p in ["hospital location", "location", "address", "where is the hospital", "hospital info", "contact info", "where is hospital", "tell me hospital"]):
             canonical_intent = "HOSPITAL_INFORMATION"
         elif canonical_intent not in {"RESCHEDULE_APPOINTMENT", "CANCEL_APPOINTMENT"}:

@@ -50,20 +50,20 @@ import agent.llm_service as llm_service
 # Controlled Department Mapping Layer (Must match DB department_name)
 DEPARTMENT_SYMPTOM_MAP = {
     "Dermatology": [
-        "hair loss", "hair fall", "losing hair", "hair falling", "hair problem",
+        "hair loss", "hair fall", "hair fal", "losing hair", "hair falling", "hair problem",
         "hair shedding", "hair is falling", "hair falls", "my hair is falling",
         "losing my hair", "am losing my hair", "i am losing my hair",
         "hair coming out", "hair came out", "hair drop", "thinning hair",
         "going bald", "getting bald",
         "bald", "baldness", "bald patches", "dandruff",
-        "acne", "pimples", "skin rash", "skin allergy", "skin problem",
-        "eczema", "psoriasis", "itching", "skin itching", "scalp", "itchy", "skin is itchy", "my skin is itchy", "itchy skin"
+        "acne", "pimples", "pimpls", "skin rash", "skin allergy", "skin problem", "skinn",
+        "eczema", "psoriasis", "itching", "itchying", "skin itching", "scalp", "itchy", "skin is itchy", "my skin is itchy", "itchy skin"
     ],
     "General Medicine": [
-        "fever", "high fever", "cold", "cough", "flu", "viral fever",
+        "fever", "fevr", "high fever", "cold", "cld", "cough", "couggh", "flu", "viral fever",
         "general weakness", "body pain", "body ache", "fatigue", "vomiting",
         "diarrhea", "headache", "migraine", "stomach pain", "stomach ache",
-        "nausea", "dizziness", "don't feel well", "not feeling well", "feel unwell", "unwell", "ill", "i have pain", "pain"
+        "nausea", "dizziness", "don't feel well", "not feeling well", "feel unwell", "unwell", "ill", "i have pain", "pain", "payn", "payning"
     ],
     "Cardiology": [
         "chest pain", "chest hurts", "my chest hurts", "chest hurting", "chest ache", "heart pain", "heart problem", "palpitations",
@@ -71,15 +71,16 @@ DEPARTMENT_SYMPTOM_MAP = {
     ],
     "Pediatrics": [
         "child fever", "baby fever", "pediatric", "child health",
-        "child growth", "infant illness", "kid fever", "child cold", "my son", "for my son", "my daughter", "for my daughter", "son", "daughter"
+        "child growth", "infant illness", "kid fever", "child cold"
     ],
     "Orthopedics": [
-        "joint pain", "bone pain", "fracture", "back pain", "knee pain",
+        "joint pain", "joiont pain", "bone pain", "fracture", "back pain", "knee pain", "knne pain",
         "leg pain", "shoulder pain", "arthritis", "spine pain"
     ],
     "ENT": [
-        "ear pain", "earache", "hearing problem", "hearing loss",
-        "sinus", "sinusitis", "throat problem", "sore throat", "tonsils",
+        "nose pain", "nos pain", "nos is payning", "noseache", "nose problem", "nasal pain", "nasel pain", "nose", "nos",
+        "ear pain", "eare pain", "earache", "hearing problem", "hearing loss",
+        "sinus", "sinusitis", "throat problem", "thorat problem", "sore throat", "tonsils",
         "nasal congestion", "running nose"
     ],
     "Gynecology": [
@@ -378,8 +379,10 @@ def route_patient_message(message_text: str, current_state: Optional[dict] = Non
     router_intent = "UNKNOWN"
     sub_intent = None
 
-    if any(p in msg_lower for p in ["move my appointment", "change my appointment", "reschedule my appointment", "reschedule appointment"]):
+    if any(p in msg_lower for p in ["move my appointment", "change my appointment", "reschedule my appointment", "reschedule appointment", "reschedul", "reshdule", "reshedul"]):
         router_intent = "RESCHEDULE_APPOINTMENT"
+    elif any(p in msg_lower for p in ["cancel my appointment", "cancel appointment", "cancle my appoinment", "cancle appointment", "cancle", "cancl"]):
+        router_intent = "CANCEL_APPOINTMENT"
     elif raw_intent in ["GREETING", "THANK_YOU", "GOODBYE"]:
         router_intent = "GREETING"
     elif raw_intent in ["REGISTER_PATIENT", "IDENTIFY_PATIENT"]:
@@ -421,13 +424,15 @@ def route_patient_message(message_text: str, current_state: Optional[dict] = Non
 
     # Natural Language Phrases Fallbacks
     if router_intent == "UNKNOWN":
-        if any(p in msg_lower for p in ["see a doctor", "consult someone", "book a doctor", "need an appointment", "want an appointment", "book appointment"]):
+        if any(p in msg_lower for p in ["see a doctor", "consult someone", "book a doctor", "need an appointment", "want an appointment", "book appointment", "bok an appoinment", "bok appointment", "bok"]):
             router_intent = "BOOK_APPOINTMENT"
+            if appointment_for == "CHILD":
+                sub_intent = "DEPENDENT_BOOKING"
         elif any(p in msg_lower for p in ["connect me with staff", "talk to human", "speak with receptionist", "need help"]):
             router_intent = "HUMAN_ESCALATION"
-        elif any(p in msg_lower for p in ["cancel my appointment", "cancel appointment"]):
+        elif any(p in msg_lower for p in ["cancel my appointment", "cancel appointment", "cancle my appoinment", "cancle appointment", "cancle", "cancl"]):
             router_intent = "CANCEL_APPOINTMENT"
-        elif any(p in msg_lower for p in ["move my appointment", "change my appointment"]):
+        elif any(p in msg_lower for p in ["move my appointment", "change my appointment", "reschedul my appoinment", "reschedul appointment", "reschedul", "reshdule"]):
             router_intent = "RESCHEDULE_APPOINTMENT"
         elif any(p in msg_lower for p in ["who is available", "doctors are available"]):
             router_intent = "CHECK_DOCTOR_AVAILABILITY"

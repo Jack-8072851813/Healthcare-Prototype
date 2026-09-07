@@ -2,9 +2,16 @@
 .env
 *.env
 
-# Python cache
+# Python cache & test artifacts
 __pycache__/
 *.pyc
+.pytest_cache/
 
-# Logs
+# Logs & temp media
 *.log
+*.wav
+*.pem
+
+# Scratch directory runtime outputs
+scratch/*
+!scratch/.gitkeep

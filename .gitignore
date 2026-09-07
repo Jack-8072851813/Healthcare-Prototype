@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build & cache
+dist/
+build/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Environment & secrets
+.env
+*.env
+
+# Runtime logs & temp files
+*.log
+*.wav
+backend/scratch/*
+!backend/scratch/.gitkeep

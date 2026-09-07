@@ -208,15 +208,22 @@ def extract_entities(text: str) -> dict:
         if match_btn_doc:
             entities["doctor_id"] = int(match_btn_doc.group(1))
 
-        # Match doctor names
+        # Match doctor names (requiring "dr"/"doctor" context or full clean display_name)
         cur.execute("SELECT id, display_name FROM doctors WHERE status = 'ACTIVE';")
         doctors = cur.fetchall()
-        for doc_id, display_name in doctors:
-            name_parts = re.findall(r"\b\w+\b", display_name.lower())
-            for part in name_parts:
-                if len(part) <= 2 or part in ["dr", "dr.", "kumar", "ramesh", "mr", "mrs", "ms"]:
-                    continue
-                if re.search(r"\b" + re.escape(part) + r"\b", text_lower):
+        if "dr" in text_lower or "doctor" in text_lower:
+            for doc_id, display_name in doctors:
+                name_parts = re.findall(r"\b\w+\b", display_name.lower())
+                for part in name_parts:
+                    if len(part) <= 2 or part in ["dr", "dr.", "kumar", "ramesh", "mr", "mrs", "ms"]:
+                        continue
+                    if re.search(r"\b" + re.escape(part) + r"\b", text_lower):
+                        entities["doctor_id"] = doc_id
+                        break
+        else:
+            for doc_id, display_name in doctors:
+                d_clean = display_name.lower().replace("dr.", "").replace("dr", "").strip()
+                if d_clean and len(d_clean) > 3 and re.search(r"\b" + re.escape(d_clean) + r"\b", text_lower):
                     entities["doctor_id"] = doc_id
                     break
 
@@ -249,8 +256,8 @@ def extract_entities(text: str) -> dict:
 
             # ENT — check before General Medicine
             elif re.search(
-                r"\b(ent|ear|earache|ear\s*pain|hearing|sinus|sinus\s*infection|"
-                r"nose|nasal|throat|tonsil|snoring|smell|voice|otitis|rhinitis)\b",
+                r"\b(ent|ear|earache|ear\s*pain|eare|hearing|sinus|sinus\s*infection|"
+                r"nose|nos|nos\s*pain|nasal|nasel|throat|thorat|tonsil|snoring|smell|voice|otitis|rhinitis)\b",
                 text_lower
             ):
                 did = dept_by_name.get("ent")
@@ -270,7 +277,7 @@ def extract_entities(text: str) -> dict:
             # Pediatrics — before General Medicine
             elif re.search(
                 r"\b(pediatric|pediatrics|pediatrician|child\s*(doctor|specialist)|"
-                r"infant|baby|toddler|newborn|kid\s*(doctor|specialist))\b",
+                r"infant|baby|toddler|newborn|kid\s*(doctor|specialist)|daughtr|daugter|doughter|daugther|sonn)\b",
                 text_lower
             ):
                 did = dept_by_name.get("pediatrics")
@@ -279,7 +286,7 @@ def extract_entities(text: str) -> dict:
 
             # Orthopedics
             elif re.search(
-                r"\b(ortho|orthopedics|orthopedist|orthopedic|bone|joint\s*pain|knee|"
+                r"\b(ortho|orthopedics|orthopedist|orthopedic|bone|joint\s*pain|joiont\s*pain|knee|knne|"
                 r"spine|back\s*pain|backache|fracture|shoulder|neck\s*pain|arthritis|"
                 r"sprain|ligament)\b",
                 text_lower
@@ -311,8 +318,8 @@ def extract_entities(text: str) -> dict:
             # General Medicine — LAST (most general)
             elif re.search(
                 r"\b(general\s*medicine|general\s*physician|general\s*doctor|"
-                r"fever|cold|cough|flu|nausea|vomiting|diarrhea|fatigue|weakness|"
-                r"body\s*pain|feverish|infection|ailment|sick|illness|general\s*checkup)\b",
+                r"fever|fevr|cold|cld|cough|couggh|flu|nausea|vomiting|diarrhea|fatigue|weakness|"
+                r"body\s*pain|feverish|pain|payn|payning|infection|ailment|sick|illness|general\s*checkup)\b",
                 text_lower
             ):
                 did = dept_by_name.get("general medicine")
@@ -332,12 +339,17 @@ def extract_entities(text: str) -> dict:
 
     # 4. Extract symptoms/reason
     symptom_keywords = [
-        "fever", "cold", "cough", "headache", "pain", "vomiting", "stomach",
+        "nose pain", "nos is payning", "nos pain", "noseache", "nose problem", "nasal pain", "nose", "nos",
+        "fever", "fevr", "cold", "cough", "couggh", "headache", "pain", "payn", "payning", "vomiting", "stomach pain", "stomach ache", "stomach",
         "rash", "dizzy", "dizziness", "hair fall", "hair loss", "acne", "pimples",
-        "skin rash", "itching", "eczema", "joint pain", "bone pain", "ear pain",
-        "migraine", "chest pain", "pregnancy", "weakness", "fatigue"
+        "skin rash", "itching", "itchying", "eczema", "joint pain", "bone pain", "ear pain", "earache",
+        "migraine", "chest pain", "back pain", "knee pain", "neck pain", "shoulder pain", "leg pain",
+        "pregnancy", "weakness", "fatigue"
     ]
-    found_symptoms = [w for w in symptom_keywords if w in text_lower]
+    sorted_keywords = sorted(symptom_keywords, key=len, reverse=True)
+    raw_found = [w for w in sorted_keywords if w in text_lower]
+    found_symptoms = [s for s in raw_found if not any(s != other and s in other for other in raw_found)]
+
     if found_symptoms:
         entities["reason"] = f"Symptoms: {', '.join(found_symptoms)}"
     elif "checkup" in text_lower or "regular checkup" in text_lower:
@@ -359,11 +371,11 @@ def map_symptom_to_department_name(text: str) -> str:
     rules = [
         # 1. DERMATOLOGY — checked FIRST (highest specificity for skin/hair)
         (
-            r"\b(hair|hairfall|hair\s*fall|hair\s*loss|hair\s*shedding|hair\s*falling|"
+            r"\b(hair|hairfall|hair\s*fall|hair\s*fal|hair\s*loss|hair\s*shedding|hair\s*falling|"
             r"hair\s*problem|hair\s*issue|hair\s*thinning|losing\s*hair|"
             r"bald|baldness|thinning|scalp|dandruff|"
-            r"acne|pimple|pimples|blackhead|whitehead|"
-            r"skin|rash|itching|itch|itchy|eczema|psoriasis|"
+            r"acne|pimple|pimples|pimpls|blackhead|whitehead|"
+            r"skin|skinn|rash|itching|itchying|itch|itchy|eczema|psoriasis|"
             r"allergy|skin\s*infection|hives|dermatitis|"
             r"lesion|wound\s*healing|pigmentation|dark\s*spot|"
             r"dermatology|dermatologist)\b",
@@ -371,9 +383,10 @@ def map_symptom_to_department_name(text: str) -> str:
         ),
         # 2. PEDIATRICS — checked early (child/baby keywords are specific)
         (
-            r"\b(child|baby|infant|toddler|newborn|kid|pediatric|pediatrics|pediatrician|"
-            r"my\s*son|my\s*daughter|son\s*(has|have)|daughter\s*(has|have)|"
-            r"son\s*fever|daughter\s*fever|child\s*fever|kid\s*fever|baby\s*fever|"
+            r"\b(child|chld|baby|infant|toddler|newborn|kid|kd|pediatric|pediatrics|pediatrician|"
+            r"my\s*son|my\s*sonn|my\s*daughter|my\s*daughtr|my\s*daugter|my\s*doughter|my\s*daugther|"
+            r"(son|sonn|daughter|daughtr|daugter|doughter)\s*(has|have)|"
+            r"(son|sonn|daughter|daughtr|daugter|doughter)\s*fever|child\s*fever|kid\s*fever|baby\s*fever|"
             r"children|my\s*kid|young\s*child)\b",
             "Pediatrics"
         ),
@@ -385,13 +398,13 @@ def map_symptom_to_department_name(text: str) -> str:
         ),
         # 4. ENT — before General Medicine (ear/nose/throat)
         (
-            r"\b(ear|earache|ear\s*pain|hearing|sinus|sinus\s*infection|nasal|"
-            r"throat|tonsil|snoring|otitis|rhinitis|ent\s*specialist)\b",
+            r"\b(ear|earache|ear\s*pain|eare|hearing|sinus|sinus\s*infection|nasal|nasel|nose|nos|nos\s*pain|"
+            r"throat|thorat|tonsil|snoring|otitis|rhinitis|ent\s*specialist)\b",
             "ENT"
         ),
         # 5. ORTHOPEDICS — before General Medicine (bone/joint)
         (
-            r"\b(joint\s*pain|bone\s*pain|back\s*pain|backache|knee\s*pain|"
+            r"\b(joint\s*pain|joiont\s*pain|bone\s*pain|back\s*pain|bakk\s*pain|backache|knee\s*pain|knne\s*pain|"
             r"spine|fracture|shoulder\s*pain|neck\s*pain|arthritis|sprain|"
             r"ligament|orthopedic|orthopedics|orthopedist)\b",
             "Orthopedics"
@@ -410,8 +423,8 @@ def map_symptom_to_department_name(text: str) -> str:
         ),
         # 8. GENERAL MEDICINE — LAST (most generic)
         (
-            r"\b(fever|cold|cough|stomach|flu|nausea|vomiting|diarrhea|fatigue|"
-            r"weakness|body\s*pain|feverish|pain|infection|ailment|sick|illness|"
+            r"\b(fever|fevr|cold|cld|cough|couggh|stomach|flu|nausea|vomiting|diarrhea|fatigue|"
+            r"weakness|body\s*pain|feverish|pain|payn|payning|infection|ailment|sick|illness|"
             r"general\s*checkup|headache|runny\s*nose|sneezing|sore\s*throat)\b",
             "General Medicine"
         ),
@@ -432,13 +445,13 @@ def extract_relationship(text: str) -> dict:
     text_lower = text.lower()
     result = {"appointment_for": None, "relationship": None}
 
-    if re.search(r"\b(for\s*my\s*son|my\s*son\s*(has|have|is|needs|want))\b", text_lower):
+    if re.search(r"\b(for\s*my\s*(son|sonn)|my\s*(son|sonn)\s*(has|have|is|needs|want))\b", text_lower):
         result["appointment_for"] = "CHILD"
         result["relationship"] = "SON"
-    elif re.search(r"\b(for\s*my\s*daughter|my\s*daughter\s*(has|have|is|needs|want))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(daughter|daughtr|daugter|doughter|daugther)|my\s*(daughter|daughtr|daugter|doughter|daugther)\s*(has|have|is|needs|want|would))\b", text_lower):
         result["appointment_for"] = "CHILD"
         result["relationship"] = "DAUGHTER"
-    elif re.search(r"\b(for\s*my\s*(child|kid|baby)|my\s*(child|kid|baby)\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(child|chld|kid|kd|baby)|my\s*(child|chld|kid|kd|baby)\s*(has|have|is))\b", text_lower):
         result["appointment_for"] = "CHILD"
         result["relationship"] = "CHILD"
     elif re.search(r"\b(for\s*my\s*(wife|spouse)|my\s*(wife|spouse)\s*(has|have|is))\b", text_lower):
@@ -459,6 +472,12 @@ def extract_relationship(text: str) -> dict:
     elif re.search(r"\b(for\s*my\s*(family|relative|dependent|family\s*member))\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "DEPENDENT"
+    elif re.search(r"\b((bok|book|schedule|want)\s*(an?\s*)?appoin?t?m?e?n?t?\s*for\s*my\s*(daughter|daughtr|daugter|doughter|daugther))\b", text_lower):
+        result["appointment_for"] = "CHILD"
+        result["relationship"] = "DAUGHTER"
+    elif re.search(r"\b((bok|book|schedule|want)\s*(an?\s*)?appoin?t?m?e?n?t?\s*for\s*my\s*(son|sonn))\b", text_lower):
+        result["appointment_for"] = "CHILD"
+        result["relationship"] = "SON"
     elif re.search(r"\b(myself|for\s*me|my\s*appointment)\b", text_lower):
         result["appointment_for"] = "SELF"
 

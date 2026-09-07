@@ -39,9 +39,13 @@ if backend_dir not in sys.path:
 
 import db_config
 import agent.agent_service as agent_service
+import agent.message_aggregator as message_aggregator
 import voice.speech_to_text as speech_to_text
 import voice.text_to_speech as text_to_speech
 import voice.whatsapp_client as whatsapp_client
+
+# Module-level aggregator singleton — 3 s debounce window
+_aggregator = message_aggregator.get_aggregator(window_seconds=3.0)
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp Webhook"])
 
@@ -251,13 +255,16 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
         # 1. Text or Interactive Message flow
         if msg_type in ["text", "interactive"]:
+            interactive_id = None
             if msg_type == "interactive":
                 interactive_obj = message_data.get("interactive", {})
                 i_type = interactive_obj.get("type")
                 if i_type == "button_reply":
-                    text_body = interactive_obj.get("button_reply", {}).get("title") or interactive_obj.get("button_reply", {}).get("id", "")
+                    interactive_id = interactive_obj.get("button_reply", {}).get("id", "")
+                    text_body = interactive_obj.get("button_reply", {}).get("title") or interactive_id
                 elif i_type == "list_reply":
-                    text_body = interactive_obj.get("list_reply", {}).get("title") or interactive_obj.get("list_reply", {}).get("id", "")
+                    interactive_id = interactive_obj.get("list_reply", {}).get("id", "")
+                    text_body = interactive_obj.get("list_reply", {}).get("title") or interactive_id
                 else:
                     text_body = ""
             else:
@@ -270,12 +277,13 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             whatsapp_client.mark_message_read(msg_id)
             whatsapp_client.send_typing_indicator(from_number)
 
-            def process_and_send_reply(session_code: str, sender_num: str, message_id: str, body_text: str):
+            def process_and_send_reply(session_code: str, sender_num: str, message_id: str, body_text: str, button_id: str = None):
                 try:
                     agent_res = agent_service.process_agent_message(
                         conversation_code=session_code,
                         patient_code=None,
-                        message_text=body_text
+                        message_text=body_text,
+                        interactive_id=button_id
                     )
                     if agent_res.get("interactive_buttons"):
                         send_res = whatsapp_client.send_button_message(sender_num, agent_res["response"], agent_res["interactive_buttons"])
@@ -286,7 +294,33 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 except Exception as e:
                     print(f"[ERROR] Background WhatsApp message dispatch failed: {e}")
 
-            background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, text_body)
+            # Interactive button taps bypass the aggregator (always single-turn)
+            if msg_type == "interactive":
+                background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, text_body, interactive_id)
+                return {
+                    "status": "success",
+                    "message_id": msg_id,
+                    "session_id": session_id
+                }
+
+            # Plain text: route through debounce aggregator.
+            # Register the flush callback so merged text reaches the agent.
+            def _flush_callback(phone_num: str, merged_text: str):
+                """Called by aggregator timer when the debounce window expires."""
+                try:
+                    process_and_send_reply(session_id, phone_num, msg_id, merged_text)
+                except Exception as exc:
+                    print(f"[ERROR] Aggregator flush callback error for {phone_num}: {exc}")
+
+            _aggregator.set_flush_callback(_flush_callback)
+            result = _aggregator.add(from_number, text_body)
+
+            if result is not None:
+                # Window was not open — flush returned immediately (shouldn't happen with
+                # the timer-based flow, but handle defensively)
+                background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, result)
+
+            # Always return 200 quickly to Meta — actual response sent asynchronously
             return {
                 "status": "success",
                 "message_id": msg_id,
