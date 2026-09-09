@@ -338,7 +338,10 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T | nul
     if (!res.ok) {
       const errorMsg = data?.detail || `Server error (${res.status})`;
       console.warn(`[Dashboard API] ${path} returned ${res.status}:`, errorMsg);
-      return { success: false, error: errorMsg } as unknown as T;
+      if (res.status === 401) {
+        sessionStorage.removeItem('meridian_user');
+      }
+      return null;
     }
     return data as T;
   } catch (err) {

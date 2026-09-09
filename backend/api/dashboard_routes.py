@@ -897,7 +897,7 @@ def get_doctors(
     search: Optional[str] = Query(None),
     department: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    admin_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_doctor_or_admin)
 ):
     """Returns all doctors with appointment count and schedule availability."""
     conn = None
@@ -1521,7 +1521,7 @@ def delete_doctor_schedule(schedule_id: int, admin_user: dict = Depends(require_
 # ─── Departments ──────────────────────────────────────────────────────────────
 
 @router.get("/departments")
-def get_departments(admin_user: dict = Depends(require_admin)):
+def get_departments(current_user: dict = Depends(require_doctor_or_admin)):
     """Returns all departments with doctor count and appointment stats."""
     conn = None
     try:
