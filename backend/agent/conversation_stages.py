@@ -428,6 +428,14 @@ def _accept_field(state: dict, field: str, value: Any, log_fn, permissive: bool 
     if field in ENTITY_FIELDS:
         entity_key = ENTITY_FIELDS[field]
         existing = state["entities"].get(entity_key)
+        if existing and entity_key == "reason" and value != existing and state.get("change_pending_field") != "reason":
+            log_fn(f"  CARRY  {field} (already set: {existing!r}, ignoring: {value!r})")
+            return
+        # Bug 1 fix: never overwrite a populated list with an empty list.
+        # e.g. symptoms=['hair loss'] must NOT be cleared by a doctor-name turn that returns symptoms=[].
+        if isinstance(existing, list) and existing and isinstance(value, list) and not value:
+            log_fn(f"  CARRY  {field} (preserving non-empty list: {existing!r}, ignoring empty: {value!r})")
+            return
         if existing and not permissive:
             log_fn(f"  CARRY  {field} (already set: {existing!r})")
             return

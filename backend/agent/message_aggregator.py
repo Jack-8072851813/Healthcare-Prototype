@@ -66,7 +66,7 @@ class MessageAggregator:
     # Public API
     # ------------------------------------------------------------------
 
-    def add(self, phone_number: str, text: str) -> Optional[str]:
+    def add(self, phone_number: str, text: str, metadata: Optional[dict] = None) -> Optional[str]:
         """
         Add a message fragment.  Returns:
         - None  : window is open, more fragments expected (caller returns 200 quickly)
@@ -84,6 +84,16 @@ class MessageAggregator:
             now = time.monotonic()
             entry = self._buffer.get(phone_number)
 
+            if self._window <= 0.0:
+                merged = text
+                if entry:
+                    self._cancel_timer(phone_number, entry=entry)
+                    separator = self._choose_separator(entry["text"], text)
+                    merged = entry["text"] + separator + text
+                    self._buffer.pop(phone_number, None)
+                _log(f"[{phone_number}] Immediate 0s window flush: \"{merged[:120]}\"")
+                return merged
+
             if entry:
                 # Existing window -- concatenate
                 separator = self._choose_separator(entry["text"], text)
@@ -95,6 +105,10 @@ class MessageAggregator:
                 self._cancel_timer(phone_number)
                 entry["text"] = new_text
                 entry["expires_at"] = now + self._window
+                if metadata:
+                    if "metadata" not in entry or not isinstance(entry.get("metadata"), dict):
+                        entry["metadata"] = {}
+                    entry["metadata"].update(metadata)
                 _log(
                     f"[{phone_number}] Appended fragment. Buffer: \"{new_text[:120]}\""
                 )
@@ -107,6 +121,7 @@ class MessageAggregator:
                     "text": text,
                     "expires_at": now + self._window,
                     "timer": None,
+                    "metadata": dict(metadata) if metadata else {},
                 }
                 _log(
                     f"[{phone_number}] Opened window. Initial text: \"{text[:120]}\""
@@ -127,6 +142,20 @@ class MessageAggregator:
                 self._cancel_timer(phone_number, entry=entry)
                 _log(f"[{phone_number}] Flushed: \"{entry['text'][:120]}\"")
                 return entry["text"]
+            return None
+
+    def flush_entry(self, phone_number: str) -> Optional[dict]:
+        """
+        Manually flush and return the complete entry dictionary:
+        {"text": str, "metadata": dict}
+        Returns None if no buffer exists.
+        """
+        with self._lock:
+            entry = self._buffer.pop(phone_number, None)
+            if entry:
+                self._cancel_timer(phone_number, entry=entry)
+                _log(f"[{phone_number}] Flushed entry: \"{entry['text'][:120]}\"")
+                return {"text": entry["text"], "metadata": entry.get("metadata", {})}
             return None
 
     def flush_immediate(self, phone_number: str, text: str) -> str:
@@ -178,12 +207,21 @@ class MessageAggregator:
         Flushes the buffer and dispatches the aggregated text to the registered
         callback (set via set_flush_callback).
         """
-        text = self.flush(phone_number)
-        if text and self._flush_callback:
+        entry = self.flush_entry(phone_number)
+        if entry and self._flush_callback:
+            text = entry["text"]
+            meta = entry.get("metadata", {})
             try:
-                self._flush_callback(phone_number, text)
+                import inspect
+                sig = inspect.signature(self._flush_callback)
+                if len(sig.parameters) >= 3:
+                    self._flush_callback(phone_number, text, meta)
+                else:
+                    self._flush_callback(phone_number, text)
             except Exception as exc:
                 _log(f"[{phone_number}] flush callback error: {exc}")
+                import traceback
+                traceback.print_exc()
 
     @staticmethod
     def _choose_separator(existing: str, new_fragment: str) -> str:

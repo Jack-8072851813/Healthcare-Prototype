@@ -159,11 +159,16 @@ def validate_extraction(
             rejected_fields.append(field_key)
             continue
 
-        # 1b. Check if value equals a doctor name (cross-contamination)
+        # 1b. Check if value equals or contains doctor/department name (cross-contamination guard)
         doctor_name = cleaned.get("doctor_name") or cleaned.get("doctor") or ""
-        if doctor_name and _is_name_match(val_lower, doctor_name.lower()):
+        dept_name = cleaned.get("department_name") or cleaned.get("department") or ""
+        has_doc_dept_kw = any(kw in val_lower for kw in [
+            "dr.", "dr ", "doctor", "pediatrics", "cardiology", "dermatology",
+            "orthopedics", "general medicine", "neurology", "gynecology", "urology", "ent"
+        ])
+        if (doctor_name and _is_name_match(val_lower, doctor_name.lower())) or (dept_name and _is_name_match(val_lower, dept_name.lower())) or has_doc_dept_kw:
             _log(
-                f"REJECT {field_key}={val!r} -- equals doctor name '{doctor_name}'",
+                f"REJECT {field_key}={val!r} -- equals or contains doctor/department name",
                 grounding_log,
             )
             cleaned[field_key] = None
@@ -312,6 +317,33 @@ def validate_extraction(
             cleaned["doctor_name"] = None
             if "doctor_name" not in rejected_fields:
                 rejected_fields.append("doctor_name")
+
+    # ------------------------------------------------------------------
+    # 8. Relationship grounding check -- null out ungrounded dependent relationships in SELF queries
+    # ------------------------------------------------------------------
+    rel_val = cleaned.get("relationship")
+    state_subj = conversation_state.get("appointment_subject") or conversation_state.get("booking_for")
+    if rel_val and state_subj == "SELF":
+        _dep_grnd_re = re.compile(r"\b(son|daughter|child|kid|boy|girl|father|mother|spouse|wife|husband|brother|sister|sibling|dependent)\b", re.IGNORECASE)
+        if not _dep_grnd_re.search(msg_lower) and pending_stage not in ["REGISTERING_NEW_DEPENDENT", "AWAITING_DEPENDENT_SELECTION"]:
+            _log(
+                f"REJECT relationship={rel_val!r} -- ungrounded dependent relationship in SELF query",
+                grounding_log,
+            )
+            cleaned["relationship"] = None
+            cleaned["booking_for"] = "SELF"
+            cleaned["appointment_subject"] = "SELF"
+            if "relationship" not in rejected_fields:
+                rejected_fields.append("relationship")
+
+    # ------------------------------------------------------------------
+    # 9. Confirmation validation -- set confirmed=True if affirmative during confirmation_pending
+    # ------------------------------------------------------------------
+    is_conf_pending = conversation_state.get("confirmation_pending") or pending_stage in ("AWAITING_CONFIRMATION", "CONFIRMATION")
+    msg_clean_conf = user_message.lower().strip().rstrip("!.,")
+    if is_conf_pending and (msg_clean_conf in ["yes", "yeah", "yep", "sure", "confirm", "btn_confirm_appt", "confirm appointment", "ok", "okay"] or any(w in msg_clean_conf for w in ["confirm", "yes"])):
+        cleaned["confirmed"] = True
+        _log("PASS   confirmed=True (affirmative confirmation response)", grounding_log)
 
     _log(f"--- Grounding validation END. Rejected: {rejected_fields} ---", grounding_log)
 

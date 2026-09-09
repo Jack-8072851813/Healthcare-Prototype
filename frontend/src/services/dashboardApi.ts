@@ -43,10 +43,15 @@ export function isValidPhone(phone: string | null | undefined): boolean {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DashboardSummary {
+  date_from?: string;
+  date_to?: string;
   patients: {
     total: number;
     new_today: number;
     new_this_month: number;
+    new_in_range?: number;
+    returning_in_range?: number;
+    unique_in_range?: number;
   };
   appointments: {
     today: number;
@@ -62,7 +67,8 @@ export interface DashboardSummary {
   };
   doctors: { active: number };
   conversations: { total: number; today: number };
-  escalations: { open: number; total: number };
+  escalations: { open: number; total: number; in_range?: number };
+  admissions?: { in_range: number };
 }
 
 export interface Patient {
@@ -94,11 +100,16 @@ export interface Appointment {
   booking_id: string;
   appointment_date: string;
   appointment_time: string;
+  appointment_end_time?: string;
+  duration_minutes?: number;
   status: string;
   booking_source: string;
   patient_reason: string | null;
   cancellation_reason: string | null;
+  reschedule_reason?: string | null;
   created_at: string;
+  cancelled_at?: string | null;
+  rescheduled_at?: string | null;
   patient_id: number;
   patient_code: string;
   patient_name: string;
@@ -116,6 +127,90 @@ export interface AppointmentListResponse {
   per_page: number;
   total_pages: number;
   appointments: Appointment[];
+}
+
+export interface DateWiseAnalytics {
+  date_from: string;
+  date_to: string;
+  appointments_by_date: {
+    date: string;
+    name: string;
+    total: number;
+    booked: number;
+    confirmed: number;
+    completed: number;
+    cancelled: number;
+    rescheduled: number;
+    no_show: number;
+  }[];
+  booking_trend: { date: string; count: number }[];
+  cancellation_trend: { date: string; count: number }[];
+  reschedule_trend: { date: string; count: number }[];
+  completion_trend: { date: string; count: number }[];
+  new_patients_by_date: { date: string; count: number }[];
+  doctor_analytics: {
+    doctor_id: number;
+    doctor_name: string;
+    department_name: string;
+    total: number;
+    completed: number;
+    booked: number;
+    confirmed: number;
+    cancelled: number;
+    rescheduled: number;
+    no_show: number;
+  }[];
+  department_analytics: {
+    department_id: number;
+    name: string;
+    value: number;
+    total: number;
+    completed: number;
+    pending: number;
+    cancelled: number;
+  }[];
+  booking_source_analytics: {
+    source: string;
+    count: number;
+  }[];
+}
+
+export interface DoctorDailyScheduleSlot {
+  schedule_id: number;
+  doctor_id: number;
+  doctor_name: string;
+  specialization: string;
+  department_name: string;
+  day_of_week: string;
+  working_hours: string;
+  start_time: string;
+  end_time: string;
+  slot_duration_minutes: number;
+  total_slots: number;
+  booked_slots: number;
+  completed_slots: number;
+  cancelled_slots: number;
+  rescheduled_slots: number;
+  no_show_slots: number;
+  available_slots: number;
+  slot_utilization_pct: number;
+}
+
+export interface DailyViewResponse {
+  date: string;
+  day_of_week: string;
+  totals: {
+    total: number;
+    completed: number;
+    pending: number;
+    booked: number;
+    confirmed: number;
+    cancelled: number;
+    rescheduled: number;
+    no_show: number;
+  };
+  appointments: Appointment[];
+  doctor_schedules: DoctorDailyScheduleSlot[];
 }
 
 export interface Doctor {
@@ -254,14 +349,29 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T | nul
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
-export async function fetchDashboardSummary(): Promise<DashboardSummary> {
-  const data = await apiFetch<DashboardSummary>('/api/dashboard/summary');
+export async function fetchDashboardSummary(params?: {
+  date_from?: string;
+  date_to?: string;
+  department?: string;
+  doctor_id?: number;
+  booking_source?: string;
+}): Promise<DashboardSummary> {
+  const qs = new URLSearchParams();
+  if (params?.date_from) qs.set('date_from', params.date_from);
+  if (params?.date_to) qs.set('date_to', params.date_to);
+  if (params?.department) qs.set('department', params.department);
+  if (params?.doctor_id) qs.set('doctor_id', String(params.doctor_id));
+  if (params?.booking_source) qs.set('booking_source', params.booking_source);
+
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  const data = await apiFetch<DashboardSummary>(`/api/dashboard/summary${query}`);
   return data ?? {
-    patients: { total: 0, new_today: 0, new_this_month: 0 },
+    patients: { total: 0, new_today: 0, new_this_month: 0, new_in_range: 0, returning_in_range: 0, unique_in_range: 0 },
     appointments: { today: 0, upcoming: 0, booked: 0, confirmed: 0, completed: 0, cancelled: 0, rescheduled: 0, no_show: 0, total: 0, by_source: {} },
     doctors: { active: 0 },
     conversations: { total: 0, today: 0 },
-    escalations: { open: 0, total: 0 },
+    escalations: { open: 0, total: 0, in_range: 0 },
+    admissions: { in_range: 0 },
   };
 }
 
@@ -284,9 +394,14 @@ export async function fetchPatients(params?: {
 }
 
 export async function fetchPatientDetail(patientId: number) {
-  return apiFetch<{ patient: Record<string, unknown>; appointments: Appointment[]; conversations: Conversation[] }>(
-    `/api/dashboard/patients/${patientId}`
-  );
+  return apiFetch<{
+    patient: Record<string, unknown>;
+    appointments: Appointment[];
+    upcoming_appointments?: Appointment[];
+    previous_appointments?: Appointment[];
+    conversations: Conversation[];
+    pre_admissions?: PreAdmissionItem[];
+  }>(`/api/dashboard/patients/${patientId}`);
 }
 
 export async function updatePatient(patientId: number, data: Record<string, unknown>): Promise<boolean> {
@@ -304,8 +419,12 @@ export async function fetchAppointments(params?: {
   status?: string;
   department?: string;
   doctor_id?: number;
+  booking_source?: string;
   date_from?: string;
   date_to?: string;
+  date_type?: 'appointment_date' | 'created_at';
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
   page?: number;
   per_page?: number;
 }): Promise<AppointmentListResponse> {
@@ -314,13 +433,69 @@ export async function fetchAppointments(params?: {
   if (params?.status) qs.set('status', params.status);
   if (params?.department) qs.set('department', params.department);
   if (params?.doctor_id) qs.set('doctor_id', String(params.doctor_id));
+  if (params?.booking_source) qs.set('booking_source', params.booking_source);
   if (params?.date_from) qs.set('date_from', params.date_from);
   if (params?.date_to) qs.set('date_to', params.date_to);
+  if (params?.date_type) qs.set('date_type', params.date_type);
+  if (params?.sort_by) qs.set('sort_by', params.sort_by);
+  if (params?.sort_order) qs.set('sort_order', params.sort_order);
   if (params?.page) qs.set('page', String(params.page));
   if (params?.per_page) qs.set('per_page', String(params.per_page));
 
   const data = await apiFetch<AppointmentListResponse>(`/api/dashboard/appointments?${qs}`);
   return data ?? { total: 0, page: 1, per_page: 20, total_pages: 1, appointments: [] };
+}
+
+export async function fetchDateWiseAnalytics(params?: {
+  date_from?: string;
+  date_to?: string;
+  doctor_id?: number;
+  department?: string;
+  booking_source?: string;
+}): Promise<DateWiseAnalytics> {
+  const qs = new URLSearchParams();
+  if (params?.date_from) qs.set('date_from', params.date_from);
+  if (params?.date_to) qs.set('date_to', params.date_to);
+  if (params?.doctor_id) qs.set('doctor_id', String(params.doctor_id));
+  if (params?.department) qs.set('department', params.department);
+  if (params?.booking_source) qs.set('booking_source', params.booking_source);
+
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  const data = await apiFetch<DateWiseAnalytics>(`/api/dashboard/analytics/date-wise${query}`);
+  return data ?? {
+    date_from: '',
+    date_to: '',
+    appointments_by_date: [],
+    booking_trend: [],
+    cancellation_trend: [],
+    reschedule_trend: [],
+    completion_trend: [],
+    new_patients_by_date: [],
+    doctor_analytics: [],
+    department_analytics: [],
+    booking_source_analytics: [],
+  };
+}
+
+export async function fetchDailyView(params?: {
+  date?: string;
+  doctor_id?: number;
+  department?: string;
+}): Promise<DailyViewResponse> {
+  const qs = new URLSearchParams();
+  if (params?.date) qs.set('date', params.date);
+  if (params?.doctor_id) qs.set('doctor_id', String(params.doctor_id));
+  if (params?.department) qs.set('department', params.department);
+
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  const data = await apiFetch<DailyViewResponse>(`/api/dashboard/daily-view${query}`);
+  return data ?? {
+    date: '',
+    day_of_week: '',
+    totals: { total: 0, completed: 0, pending: 0, booked: 0, confirmed: 0, cancelled: 0, rescheduled: 0, no_show: 0 },
+    appointments: [],
+    doctor_schedules: [],
+  };
 }
 
 export async function updateAppointmentStatus(bookingId: string, status: string, reason?: string): Promise<boolean> {
@@ -540,4 +715,110 @@ export async function fetchDepartmentAppointments(): Promise<{ departments: { na
     '/api/dashboard/charts/department-appointments'
   );
   return data ?? { departments: [] };
+}
+
+// ─── Pre-Admissions ───────────────────────────────────────────────────────────
+
+export interface PreAdmissionItem {
+  id: number;
+  pre_admission_code: string;
+  patient_id: number;
+  patient_code: string;
+  patient_name: string;
+  patient_phone: string;
+  doctor_id: number;
+  doctor_name: string;
+  department_id: number;
+  department_name: string;
+  appointment_id?: number | null;
+  booking_id?: string | null;
+  expected_admission_date: string;
+  expected_checkin_time?: string | null;
+  admission_type: string;
+  status: string;
+  pending_documents?: string | null;
+  submitted_documents?: string | null;
+  instructions?: string | null;
+  remarks?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  notification_status?: string | null;
+}
+
+export interface NewPreAdmissionPayload {
+  patient_id: number;
+  doctor_id: number;
+  department_id: number;
+  admission_type: string;
+  expected_admission_date: string;
+  expected_checkin_time?: string;
+  instructions?: string;
+  remarks?: string;
+  pending_documents?: string;
+}
+
+export async function fetchPreAdmissions(params?: {
+  search?: string;
+  status?: string;
+  admission_type?: string;
+  admission_date?: string;
+  patient_id?: number;
+}): Promise<{ pre_admissions: PreAdmissionItem[] }> {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set('search', params.search);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.admission_type) qs.set('admission_type', params.admission_type);
+  if (params?.admission_date) qs.set('admission_date', params.admission_date);
+  if (params?.patient_id) qs.set('patient_id', String(params.patient_id));
+
+  const data = await apiFetch<{ pre_admissions: PreAdmissionItem[] }>(`/api/dashboard/pre-admissions?${qs}`);
+  return data ?? { pre_admissions: [] };
+}
+
+export async function createPreAdmission(payload: NewPreAdmissionPayload): Promise<{
+  success: boolean;
+  pre_admission_id?: number;
+  pre_admission_code?: string;
+  error?: string;
+}> {
+  const data = await apiFetch<{
+    success: boolean;
+    pre_admission_id?: number;
+    pre_admission_code?: string;
+    error?: string;
+  }>('/api/dashboard/pre-admissions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return data ?? { success: false, error: 'Failed to create pre-admission' };
+}
+
+export async function updatePreAdmissionStatus(
+  id: number,
+  payload: { status?: string; submitted_documents?: string; pending_documents?: string; remarks?: string }
+): Promise<{ success: boolean; error?: string }> {
+  const data = await apiFetch<{ success: boolean; error?: string }>(`/api/dashboard/pre-admissions/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  return data ?? { success: false, error: 'Update failed' };
+}
+
+export async function sendPreAdmissionNotification(id: number): Promise<{ success: boolean; status?: string; whatsapp_number?: string; phone?: string; error?: string }> {
+  const data = await apiFetch<{ success: boolean; status?: string; whatsapp_number?: string; phone?: string; error?: string }>(`/api/dashboard/pre-admissions/${id}/notify`, {
+    method: 'POST',
+  });
+  return data ?? { success: false, error: 'Notification failed' };
+}
+
+export async function fetchPreAdmissionConversation(id: number): Promise<{
+  success: boolean;
+  pre_admission_id: number;
+  patient_name: string;
+  conversation?: { id: number; conversation_code: string; language: string; current_intent: string; status: string } | null;
+  messages: { id: number; sender_type: string; message_text: string; intent?: string; language?: string; timestamp?: string }[];
+  error?: string;
+}> {
+  const data = await apiFetch<any>(`/api/dashboard/pre-admissions/${id}/conversation`);
+  return data ?? { success: false, pre_admission_id: id, patient_name: '', messages: [] };
 }

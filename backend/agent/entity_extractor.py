@@ -445,40 +445,79 @@ def extract_relationship(text: str) -> dict:
     text_lower = text.lower()
     result = {"appointment_for": None, "relationship": None}
 
-    if re.search(r"\b(for\s*my\s*(son|sonn)|my\s*(son|sonn)\s*(has|have|is|needs|want))\b", text_lower):
+    if re.search(r"\b(for\s*my\s*(son|sonn)|my\s*(son|sonn))\b", text_lower):
         result["appointment_for"] = "CHILD"
         result["relationship"] = "SON"
-    elif re.search(r"\b(for\s*my\s*(daughter|daughtr|daugter|doughter|daugther)|my\s*(daughter|daughtr|daugter|doughter|daugther)\s*(has|have|is|needs|want|would))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(daughter|daughtr|daugter|doughter|daugther)|my\s*(daughter|daughtr|daugter|doughter|daugther))\b", text_lower):
         result["appointment_for"] = "CHILD"
         result["relationship"] = "DAUGHTER"
-    elif re.search(r"\b(for\s*my\s*(child|chld|kid|kd|baby)|my\s*(child|chld|kid|kd|baby)\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(child|chld|kid|kd|baby)|my\s*(child|chld|kid|kd|baby))\b", text_lower):
         result["appointment_for"] = "CHILD"
         result["relationship"] = "CHILD"
-    elif re.search(r"\b(for\s*my\s*(wife|spouse)|my\s*(wife|spouse)\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(wife|spouse)|my\s*(wife|spouse))\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "SPOUSE"
-    elif re.search(r"\b(for\s*my\s*husband|my\s*husband\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*husband|my\s*husband)\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "SPOUSE"
-    elif re.search(r"\b(for\s*my\s*(mother|mom)|my\s*(mother|mom)\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(mother|mom)|my\s*(mother|mom))\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "MOTHER"
-    elif re.search(r"\b(for\s*my\s*(father|dad)|my\s*(father|dad)\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(father|dad)|my\s*(father|dad))\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "FATHER"
-    elif re.search(r"\b(for\s*my\s*(sister|brother)|my\s*(sister|brother)\s*(has|have|is))\b", text_lower):
+    elif re.search(r"\b(for\s*my\s*(sister|brother)|my\s*(sister|brother))\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "SIBLING"
     elif re.search(r"\b(for\s*my\s*(family|relative|dependent|family\s*member))\b", text_lower):
         result["appointment_for"] = "FAMILY_MEMBER"
         result["relationship"] = "DEPENDENT"
-    elif re.search(r"\b((bok|book|schedule|want)\s*(an?\s*)?appoin?t?m?e?n?t?\s*for\s*my\s*(daughter|daughtr|daugter|doughter|daugther))\b", text_lower):
-        result["appointment_for"] = "CHILD"
-        result["relationship"] = "DAUGHTER"
-    elif re.search(r"\b((bok|book|schedule|want)\s*(an?\s*)?appoin?t?m?e?n?t?\s*for\s*my\s*(son|sonn))\b", text_lower):
-        result["appointment_for"] = "CHILD"
-        result["relationship"] = "SON"
     elif re.search(r"\b(myself|for\s*me|my\s*appointment)\b", text_lower):
         result["appointment_for"] = "SELF"
 
     return result
+
+
+def is_valid_person_name(name_str: Optional[str]) -> bool:
+    """
+    Validates whether a given string is a plausible person's name.
+    Rejects strings with digits, dates, edit/change commands, sentences,
+    greetings, symptoms, or non-name meta-phrases.
+    """
+    if not name_str or not isinstance(name_str, str):
+        return False
+    
+    cleaned = name_str.strip()
+    if len(cleaned) < 2 or len(cleaned) > 50:
+        return False
+        
+    # Rejects digits
+    if re.search(r"\d", cleaned):
+        return False
+        
+    # Rejects date-like formatting or month names
+    if re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b", cleaned, re.IGNORECASE):
+        return False
+        
+    cleaned_lower = cleaned.lower()
+    
+    # Meta phrases & command words that indicate non-name intent
+    invalid_keywords = [
+        "change", "edit", "detail", "details", "register", "registration", "appointment", "book", "booking",
+        "first-time", "first time", "existing", "visitor", "male", "female", "gender", "dob", "date of birth",
+        "phone", "number", "reason", "symptom", "fever", "cough", "cold", "doctor", "hospital", "patient",
+        "help", "cancel", "reset", "start", "stop", "no", "yes", "none", "nothing", "wait", "what", "where",
+        "how", "when", "why", "who", "need", "want", "please", "thanks", "thank", "show", "list", "delete",
+        "remove", "confirm", "correct", "update", "modify", "profile", "account", "info", "information",
+        "good morning", "good afternoon", "good evening", "hello", "hey", "hi"
+    ]
+    
+    for kw in invalid_keywords:
+        if kw in cleaned_lower:
+            return False
+            
+    # Name should consist of letters, spaces, dots, or hyphens only
+    if not re.match(r"^[a-zA-Z\s\.\-']+$", cleaned):
+        return False
+        
+    return True

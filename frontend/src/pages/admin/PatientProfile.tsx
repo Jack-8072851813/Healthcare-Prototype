@@ -3,11 +3,11 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   fetchPatientDetail, updatePatient, isValidEmail, isValidPhone, format12HourTime,
-  type Appointment, type Conversation
+  type Appointment, type Conversation, type PreAdmissionItem
 } from '../../services/dashboardApi';
 import {
   ArrowLeft, User, Phone, Mail, MapPin, Heart, AlertTriangle,
-  Calendar, MessageSquare, Edit3, Save, X, CheckCircle
+  Calendar, MessageSquare, Edit3, Save, X, CheckCircle, BedDouble, Plus
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -41,6 +41,7 @@ const PatientProfile: React.FC = () => {
   const [patient, setPatient] = useState<PatientDetail | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [preAdmissions, setPreAdmissions] = useState<PreAdmissionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -73,6 +74,7 @@ const PatientProfile: React.FC = () => {
       setPatient(patDetail);
       setAppointments(data.appointments);
       setConversations(data.conversations);
+      setPreAdmissions(data.pre_admissions || []);
 
       const searchParams = new URLSearchParams(location.search);
       if (searchParams.get('edit') === 'true') {
@@ -299,29 +301,122 @@ const PatientProfile: React.FC = () => {
         </div>
       </div>
 
-      {/* Appointment History */}
+      {/* Appointment History Partitioned */}
       <div className="card" style={{ marginTop: 20 }}>
         <div className="card-header">
-          <h3><Calendar size={16} style={{ marginRight: 8 }} />Appointment History</h3>
+          <h3><Calendar size={16} style={{ marginRight: 8 }} />Upcoming Appointments</h3>
         </div>
         <div className="table-container">
           <table className="data-table">
             <thead>
-              <tr><th>Booking ID</th><th>Doctor</th><th>Department</th><th>Date</th><th>Time</th><th>Source</th><th>Status</th></tr>
+              <tr>
+                <th>Booking ID</th>
+                <th>Doctor</th>
+                <th>Department</th>
+                <th>Appointment Date</th>
+                <th>Time & Duration</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Booked On</th>
+              </tr>
             </thead>
             <tbody>
-              {appointments.length > 0 ? appointments.map((a, i) => (
+              {appointments.filter(a => a.status !== 'CANCELLED' && a.status !== 'COMPLETED' && a.status !== 'NO_SHOW').length > 0 ? (
+                appointments.filter(a => a.status !== 'CANCELLED' && a.status !== 'COMPLETED' && a.status !== 'NO_SHOW').map((a, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{a.booking_id}</td>
+                    <td>{a.doctor_name}</td>
+                    <td>{a.department_name}</td>
+                    <td style={{ fontWeight: 600 }}>{a.appointment_date}</td>
+                    <td>
+                      <div>{format12HourTime(a.appointment_time)}</div>
+                      {a.duration_minutes && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.duration_minutes} mins</div>}
+                    </td>
+                    <td style={{ fontSize: 12 }}>{a.patient_reason || '—'}</td>
+                    <td><span className={`status-badge ${a.status.toLowerCase()}`}>{a.status}</span></td>
+                    <td><span className="intent-badge">{a.booking_source}</span></td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>No upcoming appointments scheduled</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="card-header">
+          <h3><Calendar size={16} style={{ marginRight: 8 }} />Previous & Past Consultations</h3>
+        </div>
+        <div className="table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Booking ID</th>
+                <th>Doctor</th>
+                <th>Department</th>
+                <th>Appointment Date</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Cancellation / Reschedule Reason</th>
+                <th>Source</th>
+                <th>Booked On</th>
+              </tr>
+            </thead>
+            <tbody>
+              {appointments.filter(a => a.status === 'CANCELLED' || a.status === 'COMPLETED' || a.status === 'NO_SHOW').length > 0 ? (
+                appointments.filter(a => a.status === 'CANCELLED' || a.status === 'COMPLETED' || a.status === 'NO_SHOW').map((a, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{a.booking_id}</td>
+                    <td>{a.doctor_name}</td>
+                    <td>{a.department_name}</td>
+                    <td>{a.appointment_date}</td>
+                    <td>{format12HourTime(a.appointment_time)}</td>
+                    <td><span className={`status-badge ${a.status.toLowerCase()}`}>{a.status}</span></td>
+                    <td style={{ fontSize: 12, color: a.status === 'CANCELLED' ? '#E53E3E' : 'inherit' }}>
+                      {a.cancellation_reason ? `Cancelled: ${a.cancellation_reason}` : a.reschedule_reason ? `Rescheduled: ${a.reschedule_reason}` : (a.patient_reason || '—')}
+                    </td>
+                    <td><span className="intent-badge">{a.booking_source}</span></td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>No past consultation history</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Pre-Admission History */}
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="card-header">
+          <h3><BedDouble size={16} style={{ marginRight: 8 }} />Pre-Admission History</h3>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate('/admin/pre-admissions')}>
+            <Plus size={13} /> Manage Pre-Admissions
+          </button>
+        </div>
+        <div className="table-container">
+          <table className="data-table">
+            <thead>
+              <tr><th>Code</th><th>Doctor</th><th>Department</th><th>Type</th><th>Expected Date</th><th>Status</th><th>Documents</th></tr>
+            </thead>
+            <tbody>
+              {preAdmissions.length > 0 ? preAdmissions.map((pa, i) => (
                 <tr key={i}>
-                  <td style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{a.booking_id}</td>
-                  <td>{a.doctor_name}</td>
-                  <td>{a.department_name}</td>
-                  <td>{a.appointment_date}</td>
-                  <td>{format12HourTime(a.appointment_time)}</td>
-                  <td><span className="intent-badge">{a.booking_source}</span></td>
-                  <td><span className={`status-badge ${a.status.toLowerCase()}`}>{a.status}</span></td>
+                  <td style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{pa.pre_admission_code}</td>
+                  <td>Dr. {pa.doctor_name}</td>
+                  <td>{pa.department_name}</td>
+                  <td><span className="intent-badge">{pa.admission_type}</span></td>
+                  <td>{pa.expected_admission_date}</td>
+                  <td><span className={`status-badge ${pa.status === 'CONFIRMED' ? 'active' : pa.status === 'CANCELLED' ? 'inactive' : 'pending'}`}>{pa.status}</span></td>
+                  <td style={{ fontSize: 12 }}>{pa.pending_documents || 'Completed'}</td>
                 </tr>
               )) : (
-                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No appointment records found</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>No pre-admission records found for this patient</td></tr>
               )}
             </tbody>
           </table>

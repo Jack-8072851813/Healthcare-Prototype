@@ -45,7 +45,7 @@ import voice.text_to_speech as text_to_speech
 import voice.whatsapp_client as whatsapp_client
 
 # Module-level aggregator singleton — 3 s debounce window
-_aggregator = message_aggregator.get_aggregator(window_seconds=3.0)
+_aggregator = message_aggregator.get_aggregator(window_seconds=1.5)
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp Webhook"])
 
@@ -135,6 +135,61 @@ def get_or_create_whatsapp_session(whatsapp_number: str) -> str:
         conn.close()
 
 
+def process_and_send_reply(session_code: str, sender_num: str, message_id: str, body_text: str, button_id: str = None):
+    t_total_start = time.monotonic()
+    masked_num = f"***{sender_num[-4:]}" if sender_num and len(sender_num) >= 4 else "****"
+    try:
+        t_agent_start = time.monotonic()
+        agent_res = agent_service.process_agent_message(
+            conversation_code=session_code,
+            patient_code=None,
+            message_text=body_text,
+            interactive_id=button_id
+        )
+        t_agent_ms = int((time.monotonic() - t_agent_start) * 1000)
+
+        t_send_start = time.monotonic()
+        if agent_res.get("interactive_buttons"):
+            send_res = whatsapp_client.send_button_message(sender_num, agent_res["response"], agent_res["interactive_buttons"])
+        else:
+            send_res = whatsapp_client.send_text_message(sender_num, agent_res["response"])
+        t_send_ms = int((time.monotonic() - t_send_start) * 1000)
+
+        t_total_ms = int((time.monotonic() - t_total_start) * 1000)
+        print(
+            f"[PERF] num={masked_num} intent={agent_res.get('intent','?')} | "
+            f"agent={t_agent_ms}ms  wa_send={t_send_ms}ms  total={t_total_ms}ms"
+        )
+
+        record_whatsapp_message_id(session_code, message_id)
+        print(f"[DEBUG] Outbound message dispatch complete for {message_id}")
+        return agent_res
+    except Exception as e:
+        t_total_ms = int((time.monotonic() - t_total_start) * 1000)
+        print(f"[ERROR] Background WhatsApp message dispatch failed after {t_total_ms}ms: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def _global_whatsapp_flush_callback(phone_num: str, merged_text: str, metadata: dict = None):
+    """
+    Module-level callback triggered when the message aggregator timer expires for a phone number.
+    Resolves session ID dynamically to ensure thread-safety and correct session state.
+    """
+    try:
+        msg_id = (metadata or {}).get("msg_id") if metadata else None
+        session_id = get_or_create_whatsapp_session(phone_num)
+        process_and_send_reply(session_id, phone_num, msg_id, merged_text)
+    except Exception as exc:
+        print(f"[ERROR] Global WhatsApp flush callback error for {phone_num}: {exc}")
+        import traceback
+        traceback.print_exc()
+
+
+_aggregator.set_flush_callback(_global_whatsapp_flush_callback)
+
+
 @router.get("/webhook")
 def verify_webhook(
     hub_mode: str = Query(None, alias="hub.mode"),
@@ -145,7 +200,8 @@ def verify_webhook(
     Handle Meta webhook verification challenge.
     GET /api/whatsapp/webhook?hub.mode=subscribe&hub.challenge=1158201444&hub.verify_token=meridian_hospital_token
     """
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
+    verify_token = os.getenv("META_WHATSAPP_VERIFY_TOKEN", os.getenv("WHATSAPP_VERIFY_TOKEN", "meridian_hospital_token"))
+    if hub_mode == "subscribe" and hub_verify_token == verify_token:
         return Response(content=hub_challenge, media_type="text/plain")
         
     raise HTTPException(status_code=403, detail="Verification token mismatch")
@@ -195,7 +251,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         ).hexdigest()
 
         if not hmac.compare_digest(calculated_signature, expected_signature):
-            print("[SECURITY] WhatsApp webhook signature validation failed: Signature mismatch")
+            print(f"[SECURITY] WhatsApp webhook signature validation failed: Signature mismatch. Expected: {expected_signature}, Calculated: {calculated_signature}, Secret: {meta_app_secret}")
             raise HTTPException(status_code=403, detail="Signature mismatch")
 
         print("[SECURITY] WhatsApp webhook signature validation passed")
@@ -277,23 +333,6 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             whatsapp_client.mark_message_read(msg_id)
             whatsapp_client.send_typing_indicator(from_number)
 
-            def process_and_send_reply(session_code: str, sender_num: str, message_id: str, body_text: str, button_id: str = None):
-                try:
-                    agent_res = agent_service.process_agent_message(
-                        conversation_code=session_code,
-                        patient_code=None,
-                        message_text=body_text,
-                        interactive_id=button_id
-                    )
-                    if agent_res.get("interactive_buttons"):
-                        send_res = whatsapp_client.send_button_message(sender_num, agent_res["response"], agent_res["interactive_buttons"])
-                    else:
-                        send_res = whatsapp_client.send_text_message(sender_num, agent_res["response"])
-                    record_whatsapp_message_id(session_code, message_id)
-                    print(f"[DEBUG] Outbound message dispatch complete for {message_id}")
-                except Exception as e:
-                    print(f"[ERROR] Background WhatsApp message dispatch failed: {e}")
-
             # Interactive button taps bypass the aggregator (always single-turn)
             if msg_type == "interactive":
                 background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, text_body, interactive_id)
@@ -304,21 +343,19 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 }
 
             # Plain text: route through debounce aggregator.
-            # Register the flush callback so merged text reaches the agent.
-            def _flush_callback(phone_num: str, merged_text: str):
-                """Called by aggregator timer when the debounce window expires."""
-                try:
-                    process_and_send_reply(session_id, phone_num, msg_id, merged_text)
-                except Exception as exc:
-                    print(f"[ERROR] Aggregator flush callback error for {phone_num}: {exc}")
-
-            _aggregator.set_flush_callback(_flush_callback)
-            result = _aggregator.add(from_number, text_body)
+            result = _aggregator.add(from_number, text_body, metadata={"msg_id": msg_id, "session_id": session_id})
 
             if result is not None:
-                # Window was not open — flush returned immediately (shouldn't happen with
-                # the timer-based flow, but handle defensively)
-                background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, result)
+                # Immediate flush (e.g. window_seconds=0 or bypassed)
+                agent_res = process_and_send_reply(session_id, from_number, msg_id, result)
+                return {
+                    "status": "success",
+                    "message_id": msg_id,
+                    "session_id": session_id,
+                    "intent": agent_res.get("intent") if agent_res else None,
+                    "language": agent_res.get("language") if agent_res else None,
+                    "response": agent_res.get("response") if agent_res else None
+                }
 
             # Always return 200 quickly to Meta — actual response sent asynchronously
             return {

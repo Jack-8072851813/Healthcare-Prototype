@@ -74,7 +74,7 @@ PATTERNS = {
 
     # ---- GREETING ----
     "GREETING": [
-        r"^(hi|hello|hey|good\s*morning|good\s*afternoon|good\s*evening|yoo|greetings|hola|howdy)[\s!.]*$",
+        r"^(hi|hello|hey|good\s*morning|good\s*afternoon|good\s*evening|yoo|greetings|hola|howdy|ok|okay|k|fine|alright|sure|noted|great)[\s!.]*$",
         r"(வணக்கம்|ஹலோ|ஹாய்)",
         r"(नमस्ते|नमस्कार|हैलो)",
         r"(నమస్తే|హలో)",
@@ -149,8 +149,13 @@ PATTERNS = {
 
     # ---- APPOINTMENT_STATUS ----
     "APPOINTMENT_STATUS": [
-        r"\b(status|check\s*appointment|my\s*appointment|view\s*booking|appointment\s*status|"
-        r"what\s*is\s*my\s*appointment|show\s*my\s*booking|track\s*appointment)\b",
+        r"\b(show|view|check|list|track|get|what\s*is|what\s*are|when\s*is|do\s*i\s*have)\s*(my|our|my\s*son'?s?|my\s*daughter'?s?|my\s*child'?s?|my\s*kid'?s?|the)?\s*(upcoming|next|past)?\s*(appoin?t?m?e?n?t?s?|bookings?|status)\b",
+        r"\b(show|view|check|list|get|track)\s*(for\s*)?([A-Za-z0-9_]+'?s?)\s*appoin?t?m?e?n?t?s?\b",
+        r"\b(status|check\s*appointment|my\s*appointments?|view\s*booking|appointment\s*status|"
+        r"what\s*is\s*my\s*appointment|what\s*are\s*my\s*appointments|show\s*my\s*booking|track\s*appointment|"
+        r"when\s*is\s*my\s*next\s*appointment|show\s*my\s*upcoming\s*appointments?|do\s*i\s*have\s*any?\s*appointments?|"
+        r"show\s*my\s*son'?s?\s*appointments?|show\s*my\s*daughter'?s?\s*appointments?|show\s*my\s*child'?s?\s*appointments?|"
+        r"what\s*is\s*my\s*son'?s?\s*appointment|what\s*is\s*my\s*daughter'?s?\s*appointment|what\s*is\s*my\s*child'?s?\s*appointment)\b",
         r"(நிலை|அப்பாயிண்ட்மெண்ட்\s*விவரம்)",
         r"(स्थिति|अपॉइंटमेंट\s*चेक|विवरण)",
         r"(స్థితి|అపాయింట్మెంట్\s*చూడు)",
@@ -358,6 +363,8 @@ def detect_intent(text: str, current_intent: str = None) -> str:
                     break
 
         # Only allow explicit intent switches that make sense
+        if "APPOINTMENT_STATUS" in matched_intents:
+            return "APPOINTMENT_STATUS"
         if "CANCEL_APPOINTMENT" in matched_intents:
             return "CANCEL_APPOINTMENT"
         if "RESCHEDULE_APPOINTMENT" in matched_intents:

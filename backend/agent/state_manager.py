@@ -257,6 +257,19 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
                     updated_at = CURRENT_TIMESTAMP
                 WHERE conversation_code = %s;
             """, (valid_patient_id, db_language, db_intent, conversation_code))
+
+            cur.execute("SELECT id FROM messages WHERE conversation_id = (SELECT id FROM conversations WHERE conversation_code = %s) ORDER BY id DESC LIMIT 1;", (conversation_code,))
+            m_row = cur.fetchone()
+            if m_row:
+                cur.execute("UPDATE messages SET metadata = %s WHERE id = %s;", (json.dumps(state_dict), m_row[0]))
+            else:
+                cur.execute("SELECT id FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+                c_row = cur.fetchone()
+                if c_row:
+                    cur.execute("""
+                        INSERT INTO messages (conversation_id, sender_type, message_type, message_text, metadata)
+                        VALUES (%s, 'SYSTEM', 'TEXT', 'STATE_INIT', %s);
+                    """, (c_row[0], json.dumps(state_dict)))
         conn.commit()
     except Exception as e:
         conn.rollback()

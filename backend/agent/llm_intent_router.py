@@ -90,6 +90,7 @@ SUPPORTED_INTENTS = {
     "GENERAL_MEDICAL_QUERY",
     "CONFIRM_APPOINTMENT",
     "CHANGE_APPOINTMENT_DETAILS",
+    "PRE_ADMISSION",
     "EMERGENCY",
     "HUMAN_ESCALATION",
     "THANK_YOU",
@@ -106,7 +107,7 @@ INTENT_NORMALISATION_MAP = {
     "IDENTIFY_PATIENT":             "PATIENT_REGISTRATION",
     "DEPENDENT_PATIENT":            "DEPENDENT_BOOKING",
     "CHILD_APPOINTMENT":            "DEPENDENT_BOOKING",
-    "PRE_ADMISSION":                "HOSPITAL_INFORMATION",
+    "PRE_ADMISSION":                "PRE_ADMISSION",
     "DEPARTMENT_INFORMATION":       "HOSPITAL_INFORMATION",
     "HUMAN_ESCALATION":             "HUMAN_ESCALATION",
     "SYMPTOM_GUIDANCE":             "BOOK_APPOINTMENT",
@@ -121,6 +122,17 @@ INTENT_NORMALISATION_MAP = {
     "CHANGE_APPOINTMENT_DETAILS":   "RESCHEDULE_APPOINTMENT",
     "APPOINTMENT_DETAILS":          "APPOINTMENT_STATUS",
     "MY_APPOINTMENTS":              "APPOINTMENT_STATUS",
+    "SHOW_MY_APPOINTMENTS":         "APPOINTMENT_STATUS",
+    "SHOW_APPOINTMENTS":            "APPOINTMENT_STATUS",
+    "VIEW_APPOINTMENTS":            "APPOINTMENT_STATUS",
+    "CHECK_APPOINTMENT":            "APPOINTMENT_STATUS",
+    "APPOINTMENT_QUERY":            "APPOINTMENT_STATUS",
+    "MY_BOOKINGS":                  "APPOINTMENT_STATUS",
+    "SHOW_BOOKING":                 "APPOINTMENT_STATUS",
+    "DEPENDENT_APPOINTMENT":        "APPOINTMENT_STATUS",
+    "SON_APPOINTMENT":              "APPOINTMENT_STATUS",
+    "DAUGHTER_APPOINTMENT":         "APPOINTMENT_STATUS",
+    "CHILD_APPOINTMENTS":           "APPOINTMENT_STATUS",
     "THANK_YOU":                    "THANK_YOU",
     "GOODBYE":                      "GREETING",
     "HELP":                         "HELP",
@@ -326,6 +338,9 @@ def _build_prompt(
     booking_stage   = current_state.get("booking_stage", "")
     appt_for        = current_state.get("appointment_for", "SELF")
     relationship    = current_state.get("patient_relationship", "")
+    if appt_for == "SELF" or current_state.get("appointment_subject") == "SELF" or current_state.get("booking_for") == "SELF":
+        relationship = None
+        appt_for = "SELF"
     entities        = current_state.get("entities", {})
     known_date      = entities.get("appointment_date", "")
     known_time      = entities.get("appointment_time", "")
@@ -334,10 +349,29 @@ def _build_prompt(
     missing_info    = current_state.get("missing_information", [])
     confirm_pending = current_state.get("confirmation_pending", False)
 
+    # Resolve doctor name for pronoun resolution ("when he will be available?")
+    active_doctor_name = ""
+    if known_doc_id:
+        try:
+            import db_config as _db_cfg
+            _conn = _db_cfg.get_db_connection()
+            _cur = _conn.cursor()
+            try:
+                _cur.execute("SELECT first_name, last_name FROM doctors WHERE id = %s;", (known_doc_id,))
+                _row = _cur.fetchone()
+                if _row:
+                    active_doctor_name = f"Dr. {_row[0]} {_row[1] or ''}".strip()
+            finally:
+                _cur.close()
+                _conn.close()
+        except Exception:
+            pass
+
     state_summary = json.dumps({
         "prior_intent":        prior_intent,
         "prior_department":    prior_dept,
         "prior_doctor_id":     known_doc_id,
+        "active_doctor_name":  active_doctor_name,   # for pronoun resolution (he/him/his)
         "known_date":          known_date,
         "known_time":          known_time,
         "booking_for":         appt_for,
@@ -428,16 +462,17 @@ SYMPTOM → DEPARTMENT SEMANTIC MAPPING (use semantic understanding, not just ke
 SUPPORTED INTENTS (return exactly one):
 - GREETING: Hello, hi, good morning, any opening message
 - PATIENT_REGISTRATION: New patient wanting to register, first-time visitor
-- PATIENT_DETAILS: Patient asking for personal details, patient ID, profile info
-- BOOK_APPOINTMENT: Booking a doctor appointment for symptoms, consultation, checkup
-- DOCTOR_AVAILABILITY: Asking which doctors or slots are available
-- CANCEL_APPOINTMENT: Wants to cancel an existing appointment
-- RESCHEDULE_APPOINTMENT: Wants to move/change date or time of existing appointment
+- PATIENT_DETAILS: Asking for personal or dependent details, patient ID, profile info, DOB, son's details, daughter's details, child's details, "What is my patient ID?", "Tell me my details", "Show my patient information", "What is my son's patient ID?", "Show my daughter's details", "Tell me my child's DOB", "What is my son's patient number?". Do NOT classify as BOOK_APPOINTMENT unless the user explicitly asks to book an appointment.
+- BOOK_APPOINTMENT: Booking a NEW doctor appointment for symptoms, consultation, checkup ("book an appointment", "I want to see a doctor", "book appointment for my son", "my son needs an appointment")
+- DOCTOR_AVAILABILITY: Asking which doctors or slots are available. Also triggered by contextual pronoun references when a doctor is already known in state (e.g. "show doctor availability", "when he will be available?", "when is he available?", "what days is he available?", "when can I see him?", "show his availability", "when is the doctor available?", "what are his available dates?"). Use active_doctor_name from state for pronoun resolution.
+- CANCEL_APPOINTMENT: Wants to cancel an existing appointment ("cancel my appointment", "cancel my son's appointment")
+- RESCHEDULE_APPOINTMENT: Wants to move/change date or time of existing appointment ("reschedule my appointment", "change my appointment")
 - HOSPITAL_INFORMATION: Hospital location, address, timing, departments, contact info
 - APPOINTMENT_CONFIRMATION: Patient confirms a pending appointment booking ("yes", "confirm", "ok", "proceed")
-- APPOINTMENT_STATUS: Checking status of a booked appointment
+- APPOINTMENT_STATUS: Querying, viewing, or checking status of existing appointments ("show my appointments", "show my appointment", "what are my appointments?", "do I have an appointment?", "when is my appointment?", "when is my next appointment?", "show my upcoming appointments", "show my son's appointments", "show my son's booking", "what is my son's appointment?", "show my daughter's appointment", "what appointments does my daughter have?", "what is my child's appointment?", "show P00125 appointments"). DO NOT classify as BOOK_APPOINTMENT!
 - PATIENT_DETAILS_UPDATE: Updating personal info (name, phone, DOB, email)
-- DEPENDENT_BOOKING: Booking for a family member (son, daughter, wife, husband, mother, father, child)
+- DEPENDENT_BOOKING: Booking a NEW appointment for a family member (son, daughter, wife, husband, mother, father, child)
+- PRE_ADMISSION: Pre-admission registration, clearance, confirming admission ("confirm admission", "btn_confirm_admission"), cancelling admission ("cancel admission"), pre-admission requirements or documents
 - EMERGENCY: Chest pain, severe difficulty breathing, sudden stroke, heavy bleeding, life-threatening emergency
 - HUMAN_ESCALATION: Asking to talk to a human agent, staff, operator, or customer care
 - GENERAL_MEDICAL_QUERY: General healthcare or medical advice question
@@ -459,15 +494,23 @@ INSTRUCTIONS:
 - If pending_stage=AWAITING_DATE and patient says "tomorrow", extract appointment_date=tomorrow's date with date_raw_quote="tomorrow".
 - If pending_stage=AWAITING_BOOKING_ID, keep intent as APPOINTMENT_STATUS or CANCEL_APPOINTMENT and do not switch to BOOK_APPOINTMENT.
 - If confirmation_pending=true and patient says "yes"/"ok"/"sure", return intent=APPOINTMENT_CONFIRMATION.
-- For DEPENDENT_BOOKING: extract relationship (SON/DAUGHTER/CHILD/SPOUSE/MOTHER/FATHER/SIBLING) and booking_for=DEPENDENT.
+- For DEPENDENT_BOOKING or DEPENDENT APPOINTMENT_STATUS: extract relationship (SON/DAUGHTER/CHILD/SPOUSE/MOTHER/FATHER/SIBLING) and booking_for=DEPENDENT / CHILD.
+- For APPOINTMENT_STATUS: extract appointment_subject="SELF" (if asking "my appointments") or "DEPENDENT" (if asking "my son's appointments", "my daughter's appointments", "my child's appointments").
+- For APPOINTMENT_STATUS with Patient ID or Name: extract patient_reference="P00125" or "Johnny".
 - For appointment_time: accept natural language ("morning"→"MORNING", "afternoon"→"AFTERNOON", "evening"→"EVENING", "10 AM"→"10:00", "5 PM"→"17:00").
 - For appointment_date: resolve relative dates to YYYY-MM-DD using today={today_str}.
 - For a pure greeting ("Good morning", "Hi", "Hello") with no medical content: intent=GREETING, all entity fields=null.
+- PRONOUN RESOLUTION: If state contains active_doctor_name (e.g. "Dr. Wilson M") and the patient uses pronouns like "he", "him", "his", "the doctor" in an availability question ("when he will be available?", "when is he available?", "show his availability", "when can I see him?"), return intent=DOCTOR_AVAILABILITY and doctor_name=active_doctor_name.
+- Do NOT route "show doctor availability", "when is he available?", or "what days is he available?" to BOOK_APPOINTMENT.
+- Do NOT route "show my appointments" or "when is my appointment?" to DOCTOR_AVAILABILITY.
 
 Return ONLY a JSON object with these exact fields (no explanation, no markdown):
 {{
   "intent": "<one of the supported intents above>",
   "confidence": <float 0.0-1.0>,
+  "appointment_subject": "SELF" | "DEPENDENT" | null,
+  "patient_reference": "<extracted patient ID like P00125 or name like Johnny, or null>",
+  "time_filter": "UPCOMING" | "PAST" | "NEXT" | "ALL" | null,
   "symptoms": [<list of symptom strings, or []>],
   "medical_reason": "<symptom/visit-reason extracted from THIS message, or null>",
   "reason_raw_quote": "<exact substring from THIS message that supports medical_reason, or null>",
@@ -495,17 +538,20 @@ Return ONLY a JSON object with these exact fields (no explanation, no markdown):
 
 EXAMPLES (showing raw_quote usage):
 
+Patient: "show my appointments"
+Response: {{"intent":"APPOINTMENT_STATUS","confidence":0.99,"appointment_subject":"SELF","patient_reference":null,"time_filter":"ALL","symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
+
+Patient: "show my son's appointments"
+Response: {{"intent":"APPOINTMENT_STATUS","confidence":0.99,"appointment_subject":"DEPENDENT","patient_reference":null,"time_filter":"ALL","symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"CHILD","relationship":"SON","patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
+
+Patient: "what is my daughter's appointment?"
+Response: {{"intent":"APPOINTMENT_STATUS","confidence":0.99,"appointment_subject":"DEPENDENT","patient_reference":null,"time_filter":"ALL","symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"CHILD","relationship":"DAUGHTER","patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
+
+Patient: "Show P00125 appointments"
+Response: {{"intent":"APPOINTMENT_STATUS","confidence":0.99,"appointment_subject":"DEPENDENT","patient_reference":"P00125","time_filter":"ALL","symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":null,"relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
+
 Patient: "I have fever and cough. I want to see a doctor tomorrow morning."
-Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.98,"symptoms":["fever","cough"],"medical_reason":"fever and cough","reason_raw_quote":"fever and cough","department":"General Medicine","doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":"{tomorrow_str}","date_raw_quote":"tomorrow","appointment_time":"MORNING","time_raw_quote":"morning","needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
-
-Patient: "Good morning" (with prior booking context in state)
-Response: {{"intent":"GREETING","confidence":0.99,"symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":null,"relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
-
-Patient: "I have hair problems for that which doctor is available"
-Response: {{"intent":"DOCTOR_AVAILABILITY","confidence":0.85,"symptoms":["hair problems"],"medical_reason":"hair problems","reason_raw_quote":"hair problems","department":"Dermatology","doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":false,"clarification_question":null,"missing_fields":["appointment_date"],"language":"ENGLISH","emergency":false}}
-
-Patient: "asdfghjkl"
-Response: {{"intent":"UNKNOWN","confidence":0.10,"symptoms":[],"medical_reason":null,"reason_raw_quote":null,"department":null,"doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":null,"relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":null,"date_raw_quote":null,"appointment_time":null,"time_raw_quote":null,"needs_clarification":true,"clarification_question":"I'm sorry, I didn't understand that. Could you please tell me how I can help you today? For example: booking an appointment, doctor availability, or hospital information.","missing_fields":[],"language":"ENGLISH","emergency":false}}
+Response: {{"intent":"BOOK_APPOINTMENT","confidence":0.98,"appointment_subject":"SELF","patient_reference":null,"time_filter":null,"symptoms":["fever","cough"],"medical_reason":"fever and cough","reason_raw_quote":"fever and cough","department":"General Medicine","doctor_name":null,"doctor_raw_quote":null,"patient_type":null,"booking_for":"SELF","relationship":null,"patient_name":null,"patient_name_raw_quote":null,"date_of_birth":null,"dob_is_ambiguous":false,"gender":null,"appointment_date":"{tomorrow_str}","date_raw_quote":"tomorrow","appointment_time":"MORNING","time_raw_quote":"morning","needs_clarification":false,"clarification_question":null,"missing_fields":[],"language":"ENGLISH","emergency":false}}
 """
     return prompt
 
@@ -661,6 +707,27 @@ def _validate_and_normalise(parsed: dict, message_text: str, current_state: dict
         if relationship not in valid_rels:
             relationship = "DEPENDENT"
 
+    # --- Appointment Subject & Patient Reference for APPOINTMENT_STATUS ---
+    appt_subj = parsed.get("appointment_subject")
+    if appt_subj and str(appt_subj).upper() in {"SELF", "DEPENDENT"}:
+        appt_subj = str(appt_subj).upper()
+    elif relationship or booking_for in {"CHILD", "DEPENDENT", "FAMILY_MEMBER"}:
+        appt_subj = "DEPENDENT"
+    else:
+        appt_subj = "SELF"
+
+    pat_ref = parsed.get("patient_reference")
+    if pat_ref and str(pat_ref).strip().lower() not in {"null", "none", ""}:
+        pat_ref = str(pat_ref).strip()
+    else:
+        pat_ref = None
+
+    time_filter = parsed.get("time_filter")
+    if time_filter and str(time_filter).upper() in {"UPCOMING", "PAST", "NEXT", "ALL"}:
+        time_filter = str(time_filter).upper()
+    else:
+        time_filter = "ALL"
+
     # If DEPENDENT_BOOKING detected, ensure booking_for=CHILD
     if intent == "DEPENDENT_BOOKING":
         booking_for = "CHILD"
@@ -694,6 +761,9 @@ def _validate_and_normalise(parsed: dict, message_text: str, current_state: dict
     res_dict = {
         "intent":                intent,
         "confidence":            confidence,
+        "appointment_subject":   appt_subj,
+        "patient_reference":     pat_ref,
+        "time_filter":           time_filter,
         "symptoms":              symptoms,
         "medical_reason":        med_reason,
         "reason_raw_quote":      _clean_quote(parsed.get("reason_raw_quote")),
@@ -771,6 +841,7 @@ def _rule_based_fallback(
     """
     try:
         import agent.intent_router as intent_router
+        import agent.intent_detector as intent_detector
         msg_lower = message_text.lower()
         rule_result = intent_router.route_patient_message(message_text, current_state)
 
@@ -801,6 +872,11 @@ def _rule_based_fallback(
                 cur.close()
                 conn.close()
 
+        # Fast-path for Pre-Admission intents
+        _pre_adm_kws = ["pre-admission", "preadmission", "confirm admission", "cancel admission", "admission clearance", "btn_confirm_admission", "btn_cancel_admission", "btn_admission_help"]
+        if any(p in msg_lower for p in _pre_adm_kws) or current_state.get("intent") == "PRE_ADMISSION":
+            canonical_intent = "PRE_ADMISSION"
+
         # Detect: "my son details", "son's profile", "my daughter details", "dependent details", etc.
         _dep_detail_kws = [
             "son detail", "son's detail", "my son detail", "son profile", "son information", "son info",
@@ -808,7 +884,9 @@ def _rule_based_fallback(
             "child detail", "child's detail", "my child detail", "child profile", "dependent detail",
             "family member detail", "wife detail", "husband detail", "mother detail", "father detail",
             "show my son", "tell my son", "show son", "tell son", "son data", "daughter data",
-            "my family member detail", "family detail"
+            "my family member detail", "family detail", "son's patient id", "daughter's patient id",
+            "child's dob", "my son's patient number", "my daughter's patient id", "my child's patient id",
+            "son patient id", "daughter patient id", "child patient id", "son's dob", "daughter's dob", "child's details"
         ]
         _dep_detail_hit = any(p in msg_lower for p in _dep_detail_kws)
 
@@ -847,7 +925,9 @@ def _rule_based_fallback(
                 doc_pref = None
                 break
 
-        if canonical_intent in ("UNKNOWN", "GREETING") and (dept or doc_pref or rule_result.get("doctor_id")):
+        # Only map UNKNOWN to BOOK_APPOINTMENT if the message itself contained medical content (not pure greeting/ack)
+        has_new_medical_info = bool(rule_result.get("symptoms") or rule_result.get("doctor_preference") or (dept and any(w in msg_lower for w in ["appointment", "doctor", "consult", "book", "symptom", "fever", "pain"])))
+        if canonical_intent == "UNKNOWN" and has_new_medical_info:
             if current_state.get("intent") == "DOCTOR_AVAILABILITY":
                 canonical_intent = "DOCTOR_AVAILABILITY"
             else:
@@ -863,6 +943,12 @@ def _rule_based_fallback(
             ]):
                 canonical_intent = "RESCHEDULE_APPOINTMENT"
 
+        detected_rule_intent = intent_detector.detect_intent(message_text, current_state.get("intent"))
+        if detected_rule_intent == "APPOINTMENT_STATUS" or any(p in msg_lower for p in ["show my appointment", "show my appointments", "my son's appointment", "my daughter's appointment", "my child's appointment", "show appointments"]):
+            canonical_intent = "APPOINTMENT_STATUS"
+            dept = None
+            doc_pref = None
+
         old_appt_for = rule_result.get("appointment_for", "SELF") or "SELF"
         if old_appt_for in ["CHILD", "FAMILY_MEMBER"]:
             booking_for = "CHILD"
@@ -870,6 +956,28 @@ def _rule_based_fallback(
             booking_for = "SELF"
 
         rel = rule_result.get("relationship")
+        if not rel:
+            import re as _re_rel
+            if _re_rel.search(r"\b(son|boy)\b", msg_lower):
+                rel = "SON"
+            elif _re_rel.search(r"\b(daughter|girl)\b", msg_lower):
+                rel = "DAUGHTER"
+            elif _re_rel.search(r"\b(child|kid)\b", msg_lower):
+                rel = "CHILD"
+
+        if canonical_intent == "APPOINTMENT_STATUS":
+            dept = None
+            doc_pref = None
+            appt_subj = "DEPENDENT" if (rel or any(w in msg_lower for w in ["son", "daughter", "child", "kid"])) else "SELF"
+            if appt_subj == "DEPENDENT":
+                booking_for = "CHILD"
+        else:
+            appt_subj = "SELF"
+
+        import re as _re_ref
+        _ref_m = _re_ref.search(r"\b(P\d{3,6}|PAT\d{4,6}|TST\d{3,6})\b", message_text, _re_ref.IGNORECASE)
+        pat_ref = _ref_m.group(1).upper() if _ref_m else None
+
         if rel and canonical_intent == "BOOK_APPOINTMENT":
             canonical_intent = "DEPENDENT_BOOKING"
             booking_for = "CHILD"
@@ -881,7 +989,10 @@ def _rule_based_fallback(
 
         return {
             "intent":                canonical_intent,
-            "confidence":            rule_result.get("confidence", 0.8),
+            "confidence":            rule_result.get("confidence", 0.98),
+            "appointment_subject":   appt_subj,
+            "patient_reference":     pat_ref,
+            "time_filter":           "ALL",
             "symptoms":              symptoms,
             "medical_reason":        reason,
             "department":            dept,
@@ -973,6 +1084,36 @@ def route_patient_message_llm(
     if not msg_clean:
         _log("Empty message — returning UNKNOWN")
         return _fallback_structure()
+
+    # --- Fast-path: pre-admission buttons & explicit keywords ---
+    _pre_adm_btns = {"btn_confirm_admission", "btn_cancel_admission", "btn_admission_help"}
+    _pre_adm_phrases = {"confirm admission", "cancel admission", "pre-admission", "preadmission clearance", "confirm pre-admission", "cancel pre-admission", "need assistance"}
+    if msg_clean in _pre_adm_btns or msg_clean.lower() in _pre_adm_phrases or (msg_clean.lower() == "confirm" and current_state.get("intent") == "PRE_ADMISSION"):
+        _log("Fast-path pre-admission button/keyword detected — returning intent PRE_ADMISSION")
+        return {
+            "intent":                "PRE_ADMISSION",
+            "confidence":            1.0,
+            "symptoms":              [],
+            "medical_reason":        None,
+            "department":            None,
+            "doctor_name":           None,
+            "doctor_preference":     None,
+            "patient_type":          None,
+            "booking_for":           "SELF",
+            "relationship":          None,
+            "patient_name":          None,
+            "date_of_birth":         None,
+            "dob_is_ambiguous":      False,
+            "gender":                None,
+            "appointment_date":      None,
+            "appointment_time":      None,
+            "needs_clarification":   False,
+            "clarification_question": None,
+            "missing_fields":        [],
+            "language":              "ENGLISH",
+            "emergency":             False,
+            "_llm_powered":          False,
+        }
 
     # --- LLM Path ---
     if is_llm_available():

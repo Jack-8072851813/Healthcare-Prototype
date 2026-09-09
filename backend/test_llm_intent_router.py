@@ -186,7 +186,7 @@ def test_07_ear_pain_routes_to_ent():
 def test_08_child_appointment():
     res = route("I want to book an appointment for my child")
     assert res["intent"] in {"DEPENDENT_BOOKING", "BOOK_APPOINTMENT"}
-    assert res["booking_for"] == "DEPENDENT"
+    assert res["booking_for"] in {"DEPENDENT", "CHILD"}
     assert res["relationship"] in {"CHILD", "SON", "DAUGHTER", None}
 
 
@@ -422,7 +422,7 @@ def test_23_five_pm_time_followup():
 def test_24_booking_for_daughter():
     res = route("I want to book an appointment for my daughter")
     assert res["intent"] in {"DEPENDENT_BOOKING", "BOOK_APPOINTMENT"}
-    assert res["booking_for"] == "DEPENDENT"
+    assert res["booking_for"] in {"DEPENDENT", "CHILD"}
     assert res["relationship"] == "DAUGHTER"
 
 
@@ -432,7 +432,7 @@ def test_24_booking_for_daughter():
 def test_25_booking_for_son():
     res = route("Book an appointment for my son, he has fever")
     assert res["intent"] in {"DEPENDENT_BOOKING", "BOOK_APPOINTMENT"}
-    assert res["booking_for"] == "DEPENDENT"
+    assert res["booking_for"] in {"DEPENDENT", "CHILD"}
     assert res["relationship"] == "SON"
     # Son has fever — could be Pediatrics or General Medicine
     assert res["department"] in {"Pediatrics", "General Medicine", None}

@@ -1,30 +1,55 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Filter, CheckCircle, XCircle, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
-import { fetchAppointments, updateAppointmentStatus, format12HourTime, type Appointment } from '../../services/dashboardApi';
+import {
+  Search, Filter, CheckCircle, XCircle, RefreshCw, ChevronLeft, ChevronRight,
+  Download, ArrowUpDown, Clock, Calendar, User, Stethoscope, Building
+} from 'lucide-react';
+import {
+  fetchAppointments, fetchDoctors, fetchDepartments, updateAppointmentStatus,
+  format12HourTime,
+  type Appointment, type Doctor, type Department
+} from '../../services/dashboardApi';
+import DateRangeFilter, { type DateRangeValue, formatFriendlyDate, toYMD } from '../../components/DateRangeFilter';
 
 const STATUS_COLORS: Record<string, string> = {
-  BOOKED: 'pending',
-  CONFIRMED: 'active',
-  COMPLETED: 'completed',
-  CANCELLED: 'cancelled',
-  RESCHEDULED: 'rescheduled',
-  NO_SHOW: 'inactive',
+  BOOKED: '#ECC94B',
+  CONFIRMED: '#48BB78',
+  COMPLETED: '#4299E1',
+  CANCELLED: '#F56565',
+  RESCHEDULED: '#9F7AEA',
+  NO_SHOW: '#A0AEC0',
 };
 
 const AppointmentManagement: React.FC = () => {
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateRange, setDateRange] = useState<DateRangeValue>({
+    dateFrom: toYMD(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
+    dateTo: toYMD(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)),
+    preset: 'this_month',
+    displayLabel: 'This Month',
+  });
+  const [dateType, setDateType] = useState<'appointment_date' | 'created_at'>('appointment_date');
   const [deptFilter, setDeptFilter] = useState('');
+  const [doctorFilter, setDoctorFilter] = useState<number | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [sortBy, setSortBy] = useState('appointment_date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const perPage = 15;
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
+
+  // Load static filter options
+  useEffect(() => {
+    fetchDoctors().then(res => setDoctors(res.doctors));
+    fetchDepartments().then(res => setDepartments(res.departments));
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -38,23 +63,23 @@ const AppointmentManagement: React.FC = () => {
         search: search || undefined,
         status: statusFilter || undefined,
         department: deptFilter || undefined,
-        date_from: dateFilter || undefined,
-        date_to: dateFilter || undefined,
+        doctor_id: doctorFilter,
+        booking_source: sourceFilter || undefined,
+        date_from: dateRange.dateFrom,
+        date_to: dateRange.dateTo,
+        date_type: dateType,
+        sort_by: sortBy,
+        sort_order: sortOrder,
         page,
         per_page: perPage,
       });
       setAppointments(res.appointments);
       setTotal(res.total);
       setTotalPages(res.total_pages);
-      // Collect unique departments from first load
-      if (departments.length === 0 && res.appointments.length > 0) {
-        const depts = [...new Set(res.appointments.map(a => a.department_name))].sort();
-        setDepartments(depts);
-      }
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, deptFilter, dateFilter, page]);
+  }, [search, statusFilter, deptFilter, doctorFilter, sourceFilter, dateRange, dateType, sortBy, sortOrder, page]);
 
   useEffect(() => {
     const timer = setTimeout(loadAppointments, 300);
@@ -71,30 +96,119 @@ const AppointmentManagement: React.FC = () => {
     }
   };
 
-  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString() : '—';
-  const formatTime = (t: string) => {
-    if (!t) return '—';
-    const [h, m] = t.split(':');
-    const hour = parseInt(h);
-    return `${hour % 12 || 12}:${m} ${hour < 12 ? 'AM' : 'PM'}`;
+  // CSV Export feature
+  const exportToCSV = async () => {
+    try {
+      // Fetch up to 1000 items matching current filters
+      const res = await fetchAppointments({
+        search: search || undefined,
+        status: statusFilter || undefined,
+        department: deptFilter || undefined,
+        doctor_id: doctorFilter,
+        booking_source: sourceFilter || undefined,
+        date_from: dateRange.dateFrom,
+        date_to: dateRange.dateTo,
+        date_type: dateType,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        page: 1,
+        per_page: 1000,
+      });
+
+      if (!res.appointments || res.appointments.length === 0) {
+        showToast('⚠️ No appointments to export');
+        return;
+      }
+
+      const headers = [
+        'Appointment ID (Booking ID)',
+        'Patient Name',
+        'Patient ID (Code)',
+        'Phone',
+        'Doctor Name',
+        'Department',
+        'Reason',
+        'Appointment Date',
+        'Appointment Time',
+        'Duration (Minutes)',
+        'Status',
+        'Booking Source',
+        'Created Date'
+      ];
+
+      const rows = res.appointments.map(a => [
+        `"${a.booking_id || ''}"`,
+        `"${a.patient_name || ''}"`,
+        `"${a.patient_code || ''}"`,
+        `"${a.patient_phone || ''}"`,
+        `"${a.doctor_name || ''}"`,
+        `"${a.department_name || ''}"`,
+        `"${(a.patient_reason || '').replace(/"/g, '""')}"`,
+        `"${a.appointment_date || ''}"`,
+        `"${a.appointment_time || ''}"`,
+        `"${a.duration_minutes || 30}"`,
+        `"${a.status || ''}"`,
+        `"${a.booking_source || ''}"`,
+        `"${a.created_at ? new Date(a.created_at).toISOString().split('T')[0] : ''}"`
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `appointments_${dateRange.dateFrom}_to_${dateRange.dateTo}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('✓ Appointments exported to CSV successfully');
+    } catch (e) {
+      showToast('❌ Failed to export CSV');
+    }
   };
+
+  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString() : '—';
 
   return (
     <div>
       <div className="page-header">
-        <h2>Appointment Management</h2>
-        <p>View and manage all appointments — live from hospital database</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h2>Appointment Management</h2>
+            <p>View, filter, sort and manage hospital appointments — live database</p>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={exportToCSV}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Download size={14} /> Export CSV
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={loadAppointments}
+              disabled={loading}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+              Refresh
+            </button>
+          </div>
+        </div>
       </div>
 
       {toast && (
-        <div className="success-alert">
+        <div className="success-alert" style={{ marginBottom: 16 }}>
           <CheckCircle size={16} /> {toast}
         </div>
       )}
 
-      <div className="card">
-        <div className="card-header" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div className="search-bar" style={{ maxWidth: 300 }}>
+      {/* Filter and Search Bar */}
+      <div className="card" style={{ marginBottom: 20, padding: '14px 18px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Search */}
+          <div className="search-bar" style={{ flex: '1 1 240px', maxWidth: 320 }}>
             <Search size={18} />
             <input
               placeholder="Search patient, doctor, ID..."
@@ -102,32 +216,109 @@ const AppointmentManagement: React.FC = () => {
               onChange={e => { setSearch(e.target.value); setPage(1); }}
             />
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-            <input
-              type="date"
-              value={dateFilter}
-              onChange={e => { setDateFilter(e.target.value); setPage(1); }}
-              style={{ padding: '8px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'inherit' }}
+
+          {/* Date Filter & Date Type */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <DateRangeFilter
+              initialPreset="this_month"
+              initialFrom={dateRange.dateFrom}
+              initialTo={dateRange.dateTo}
+              onChange={val => { setDateRange(val); setPage(1); }}
             />
-            <select value={deptFilter} onChange={e => { setDeptFilter(e.target.value); setPage(1); }}>
-              <option value="">All Departments</option>
-              {departments.map(d => <option key={d} value={d}>{d}</option>)}
+
+            <select
+              value={dateType}
+              onChange={e => { setDateType(e.target.value as 'appointment_date' | 'created_at'); setPage(1); }}
+              style={{
+                padding: '6px 12px',
+                border: '1.5px solid var(--border)',
+                borderRadius: 'var(--radius-sm, 6px)',
+                fontSize: 13,
+                fontWeight: 500,
+                background: 'var(--bg-primary)',
+              }}
+              title="Select which timestamp to filter on"
+            >
+              <option value="appointment_date">Filter by: Appointment Date</option>
+              <option value="created_at">Filter by: Booking Created Date</option>
             </select>
-            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}>
-              <option value="">All Status</option>
-              {['BOOKED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED', 'NO_SHOW'].map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <button className="btn btn-secondary btn-sm" onClick={loadAppointments} disabled={loading}
-              style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-              Refresh
-            </button>
           </div>
         </div>
 
+        {/* Secondary Filter Row: Doctor, Department, Status, Source, Sorting */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <Filter size={15} style={{ color: 'var(--text-muted)' }} />
+
+          <select
+            value={deptFilter}
+            onChange={e => { setDeptFilter(e.target.value); setPage(1); }}
+            style={{ padding: '6px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="">All Departments</option>
+            {departments.map(d => <option key={d.id} value={d.department_name}>{d.department_name}</option>)}
+          </select>
+
+          <select
+            value={doctorFilter !== undefined ? String(doctorFilter) : ''}
+            onChange={e => { setDoctorFilter(e.target.value ? Number(e.target.value) : undefined); setPage(1); }}
+            style={{ padding: '6px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="">All Doctors</option>
+            {doctors.map(d => <option key={d.id} value={d.id}>{d.display_name}</option>)}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+            style={{ padding: '6px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="">All Status</option>
+            {['BOOKED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED', 'NO_SHOW'].map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          <select
+            value={sourceFilter}
+            onChange={e => { setSourceFilter(e.target.value); setPage(1); }}
+            style={{ padding: '6px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="">All Sources</option>
+            <option value="WHATSAPP_TEXT">WhatsApp Text</option>
+            <option value="WHATSAPP_VOICE">WhatsApp Voice</option>
+            <option value="ADMIN">Admin</option>
+            <option value="DOCTOR">Doctor</option>
+          </select>
+
+          {/* Sort By Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sort by:</span>
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              style={{ padding: '6px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+            >
+              <option value="appointment_date">Appointment Date</option>
+              <option value="created_at">Created Date</option>
+              <option value="patient">Patient Name</option>
+              <option value="doctor">Doctor Name</option>
+              <option value="status">Status</option>
+            </select>
+
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+              title={`Sort ${sortOrder.toUpperCase()}`}
+            >
+              <ArrowUpDown size={14} /> {sortOrder.toUpperCase()}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Appointment Table */}
+      <div className="card">
         <div className="table-container">
           {loading ? (
             <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
@@ -135,7 +326,7 @@ const AppointmentManagement: React.FC = () => {
             </div>
           ) : appointments.length === 0 ? (
             <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-              No appointments found for selected filters.
+              No appointments found for the selected date range and filters.
             </div>
           ) : (
             <table className="data-table">
@@ -145,35 +336,56 @@ const AppointmentManagement: React.FC = () => {
                   <th>Patient</th>
                   <th>Doctor</th>
                   <th>Department</th>
-                  <th>Date</th>
-                  <th>Time</th>
-                  <th>Source</th>
+                  <th>Reason</th>
+                  <th>Appointment Date</th>
+                  <th>Time & Duration</th>
                   <th>Status</th>
+                  <th>Source</th>
+                  <th>Created Date</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {appointments.map(a => (
-                  <tr key={a.booking_id}>
+                  <tr key={a.id || a.booking_id}>
                     <td style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{a.booking_id}</td>
                     <td>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>{a.patient_name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.patient_phone}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.patient_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.patient_code} · {a.patient_phone}</div>
                     </td>
                     <td>
-                      <div style={{ fontSize: 13 }}>{a.doctor_name}</div>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{a.doctor_name}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.specialization}</div>
                     </td>
                     <td style={{ fontSize: 13 }}>{a.department_name}</td>
-                    <td style={{ fontSize: 13 }}>{formatDate(a.appointment_date)}</td>
-                    <td style={{ fontSize: 13, fontWeight: 500 }}>{format12HourTime(a.appointment_time)}</td>
+                    <td style={{ fontSize: 12, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={a.patient_reason || ''}>
+                      {a.patient_reason || '—'}
+                    </td>
+                    <td style={{ fontSize: 13, fontWeight: 500 }}>{formatDate(a.appointment_date)}</td>
+                    <td style={{ fontSize: 13 }}>
+                      <div style={{ fontWeight: 600 }}>{format12HourTime(a.appointment_time)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {a.duration_minutes ? `${a.duration_minutes} mins` : '30 mins'}
+                        {a.appointment_end_time && ` (– ${format12HourTime(a.appointment_end_time)})`}
+                      </div>
+                    </td>
+                    <td>
+                      <span
+                        className="status-badge"
+                        style={{
+                          background: `${STATUS_COLORS[a.status] || '#A0AEC0'}20`,
+                          color: STATUS_COLORS[a.status] || '#4A5568',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {a.status}
+                      </span>
+                    </td>
                     <td>
                       <span className="intent-badge" style={{ fontSize: 11 }}>{a.booking_source}</span>
                     </td>
-                    <td>
-                      <span className={`status-badge ${STATUS_COLORS[a.status] || ''}`}>
-                        {a.status}
-                      </span>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -181,9 +393,9 @@ const AppointmentManagement: React.FC = () => {
                           <button
                             className="btn btn-success btn-sm"
                             onClick={() => handleStatusChange(a.booking_id, 'CONFIRMED')}
-                            title="Confirm"
+                            title="Confirm Appointment"
                           >
-                            <CheckCircle size={13} />
+                            <CheckCircle size={13} /> Confirm
                           </button>
                         )}
                         {(a.status === 'CONFIRMED' || a.status === 'BOOKED') && (
@@ -199,7 +411,7 @@ const AppointmentManagement: React.FC = () => {
                             <button
                               className="btn btn-danger btn-sm"
                               onClick={() => handleStatusChange(a.booking_id, 'CANCELLED', 'Cancelled by admin')}
-                              title="Cancel"
+                              title="Cancel Appointment"
                             >
                               <XCircle size={13} />
                             </button>
@@ -214,6 +426,7 @@ const AppointmentManagement: React.FC = () => {
           )}
         </div>
 
+        {/* Pagination */}
         <div className="pagination" style={{ padding: '16px 22px' }}>
           <span className="pagination-info">
             {loading ? 'Loading...' : `Showing ${Math.min((page - 1) * perPage + 1, total)}–${Math.min(page * perPage, total)} of ${total} appointments`}

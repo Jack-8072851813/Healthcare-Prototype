@@ -349,8 +349,15 @@ def route_patient_message(message_text: str, current_state: Optional[dict] = Non
 
     # 4. Dependent / Family Member Context Extraction
     rel_info = entity_extractor.extract_relationship(msg_clean)
-    appointment_for = rel_info.get("appointment_for") or current_state.get("appointment_for") or "SELF"
-    relationship = rel_info.get("relationship") or current_state.get("patient_relationship")
+
+    # Only inherit appointment_for / patient_relationship from state if the CURRENT message
+    # actually contains a dependent keyword. Never carry stale "CHILD"/"SON" from a previous
+    # booking into a fresh self-query like "show my appointments".
+    # Use word-boundary regex so "Wilson" doesn't match "son" as a substring.
+    _dep_kw_re = re.compile(r"\b(son|daughter|child|kid|boy|girl|wife|husband|mother|father|mom|dad|baby|infant)\b", re.IGNORECASE)
+    _msg_has_dep_kw = bool(_dep_kw_re.search(msg_lower))
+    appointment_for = rel_info.get("appointment_for") or (current_state.get("appointment_for") if _msg_has_dep_kw else None) or "SELF"
+    relationship = rel_info.get("relationship") or (current_state.get("patient_relationship") if _msg_has_dep_kw else None)
     is_child = (appointment_for == "CHILD" or relationship in ["SON", "DAUGHTER", "CHILD", "KID"])
 
     # 5. Symptom & Department Mapping

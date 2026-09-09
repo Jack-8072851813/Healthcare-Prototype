@@ -66,6 +66,7 @@ const AppRoutes: React.FC = () => {
         <Route path="departments" element={<DepartmentPage />} />
         <Route path="ai-desk" element={<AIPatientDesk />} />
         <Route path="pre-admission" element={<PreAdmissionPage />} />
+        <Route path="pre-admissions" element={<PreAdmissionPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="hospital-info" element={<HospitalInfoPage />} />
         <Route path="settings" element={<SettingsPage />} />

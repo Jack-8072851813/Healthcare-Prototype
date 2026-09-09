@@ -410,33 +410,62 @@ def get_appointment(booking_id, patient_id=None):
         cur.close()
         conn.close()
 
-def get_patient_appointments(patient_id):
-    """Lists all appointments for a given patient."""
+def get_patient_appointments(patient_id: int, time_filter: str = "ALL"):
+    """
+    Lists appointments for a given patient_id.
+    time_filter options: 'UPCOMING', 'PAST', 'NEXT', 'ALL'
+    Returns structured list of appointments.
+    """
+    if not patient_id:
+        return []
+
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""
+        query = """
             SELECT 
-                a.booking_id, a.status, a.appointment_date, a.appointment_time,
+                a.booking_id, a.appointment_date, a.appointment_time, a.status, a.patient_reason,
+                p.first_name || ' ' || p.last_name AS patient_name,
+                p.patient_code,
                 d.display_name AS doctor_name,
-                dept.department_name
+                dept.department_name,
+                d.consultation_fee
             FROM appointments a
+            JOIN patients p ON a.patient_id = p.id
             JOIN doctors d ON a.doctor_id = d.id
             JOIN departments dept ON a.department_id = dept.id
             WHERE a.patient_id = %s
-            ORDER BY a.appointment_date DESC, a.appointment_time DESC;
-        """, (patient_id,))
+        """
+        params = [patient_id]
+        tf_norm = (time_filter or "ALL").upper()
+        if tf_norm == "UPCOMING":
+            query += " AND a.appointment_date >= CURRENT_DATE ORDER BY a.appointment_date ASC, a.appointment_time ASC;"
+        elif tf_norm == "PAST":
+            query += " AND a.appointment_date < CURRENT_DATE ORDER BY a.appointment_date DESC, a.appointment_time DESC;"
+        elif tf_norm == "NEXT":
+            query += " AND a.appointment_date >= CURRENT_DATE ORDER BY a.appointment_date ASC, a.appointment_time ASC LIMIT 1;"
+        else:
+            # Default ALL: show upcoming first (ASC), then past (DESC)
+            query += " ORDER BY a.appointment_date DESC, a.appointment_time DESC LIMIT 10;"
+
+        cur.execute(query, tuple(params))
         rows = cur.fetchall()
-        
+
         appointments = []
         for r in rows:
+            raw_time = r[2]
+            formatted_time = raw_time.strftime("%H:%M") if hasattr(raw_time, "strftime") else str(raw_time)
             appointments.append({
                 "booking_id": r[0],
-                "status": r[1],
-                "appointment_date": str(r[2]),
-                "appointment_time": r[3].strftime("%H:%M"),
-                "doctor_name": r[4],
-                "department_name": r[5]
+                "appointment_date": str(r[1]),
+                "appointment_time": formatted_time,
+                "status": r[3],
+                "patient_reason": r[4] or "General Consultation",
+                "patient_name": (r[5] or "").strip(),
+                "patient_code": r[6],
+                "doctor_name": (r[7] or "").replace("Dr. Dr.", "Dr.").strip(),
+                "department_name": r[8],
+                "consultation_fee": r[9]
             })
         return appointments
     finally:

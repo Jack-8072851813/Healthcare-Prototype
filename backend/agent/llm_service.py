@@ -199,6 +199,11 @@ IMPORTANT: For DOB, normalize ALL formats to YYYY-MM-DD. If the date is ambiguou
                 parsed = json.loads(clean_raw)
                 if isinstance(parsed, dict):
                     print(f"[LLM] Extracted fields via LLM: {parsed}")
+                    # Sanitize LLM-extracted names using is_valid_person_name
+                    if parsed.get("first_name") and not entity_extractor.is_valid_person_name(parsed["first_name"]):
+                        parsed["first_name"] = None
+                    if parsed.get("patient_name") and not entity_extractor.is_valid_person_name(parsed["patient_name"]):
+                        parsed["patient_name"] = None
                     for k in extracted_data.keys():
                         if k in parsed and parsed[k] is not None:
                             extracted_data[k] = parsed[k]
@@ -297,10 +302,7 @@ IMPORTANT: For DOB, normalize ALL formats to YYYY-MM-DD. If the date is ambiguou
     parts = [p.strip() for p in re.split(r"[,;\n]+", text_clean) if p.strip()]
     if len(parts) >= 2:
         potential_name = parts[0]
-        if not any(kw in potential_name.lower() for kw in [
-            "register", "my name", "dob", "phone", "male", "female",
-            "book", "appointment", "hi", "hello", "morning", "afternoon", "evening"
-        ]):
+        if entity_extractor.is_valid_person_name(potential_name):
             name_words = potential_name.split()
             extracted_data["patient_name"] = potential_name
             extracted_data["first_name"] = name_words[0].capitalize()
@@ -313,11 +315,12 @@ IMPORTANT: For DOB, normalize ALL formats to YYYY-MM-DD. If the date is ambiguou
     match_name = re.search(r"(?:my\s+name\s+is|name\s*:|patient\s*:)\s*([a-zA-Z\s\.]+)", text_lower)
     if match_name:
         n_str = match_name.group(1).strip()
-        name_words = n_str.split()
-        extracted_data["patient_name"] = n_str.title()
-        extracted_data["first_name"] = name_words[0].capitalize()
-        if len(name_words) > 1:
-            extracted_data["last_name"] = " ".join(name_words[1:]).capitalize()
+        if entity_extractor.is_valid_person_name(n_str):
+            name_words = n_str.split()
+            extracted_data["patient_name"] = n_str.title()
+            extracted_data["first_name"] = name_words[0].capitalize()
+            if len(name_words) > 1:
+                extracted_data["last_name"] = " ".join(name_words[1:]).capitalize()
 
     return extracted_data
 
