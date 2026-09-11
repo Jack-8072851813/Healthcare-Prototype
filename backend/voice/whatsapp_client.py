@@ -145,7 +145,15 @@ def send_text_message(to_number: str, text: str) -> dict:
         if not res.ok:
             parse_and_log_meta_error(res)
         res.raise_for_status()
-        return {"success": True, "response": res.json()}
+        resp_data = res.json()
+        msg_id = None
+        try:
+            msg_id = resp_data.get("messages", [{}])[0].get("id")
+        except Exception:
+            pass
+        if not msg_id:
+            msg_id = f"wam.meta_msg_{uuid.uuid4().hex[:12]}"
+        return {"success": True, "message_id": msg_id, "response": resp_data}
     except Exception as e:
         log_outbound_simulation("text", to_number, payload)
         return {"success": True, "message_id": f"wam.mock_msg_{uuid.uuid4().hex[:12]}", "fallback": True}
@@ -215,7 +223,15 @@ def send_button_message(to_number: str, text: str, buttons: list) -> dict:
         if not res.ok:
             parse_and_log_meta_error(res)
         res.raise_for_status()
-        return {"success": True, "response": res.json()}
+        resp_data = res.json()
+        msg_id = None
+        try:
+            msg_id = resp_data.get("messages", [{}])[0].get("id")
+        except Exception:
+            pass
+        if not msg_id:
+            msg_id = f"wam.meta_button_{uuid.uuid4().hex[:12]}"
+        return {"success": True, "message_id": msg_id, "response": resp_data}
     except Exception as e:
         print(f"[ERROR] send_button_message failed: {e}. Falling back to send_text_message.")
         return send_text_message(to_number, text)
@@ -260,7 +276,15 @@ def send_list_message(to_number: str, text: str, button_label: str, sections: li
         if not res.ok:
             parse_and_log_meta_error(res)
         res.raise_for_status()
-        return {"success": True, "response": res.json()}
+        resp_data = res.json()
+        msg_id = None
+        try:
+            msg_id = resp_data.get("messages", [{}])[0].get("id")
+        except Exception:
+            pass
+        if not msg_id:
+            msg_id = f"wam.meta_list_{uuid.uuid4().hex[:12]}"
+        return {"success": True, "message_id": msg_id, "response": resp_data}
     except Exception as e:
         print(f"[ERROR] send_list_message failed: {e}. Falling back to send_text_message.")
         return send_text_message(to_number, text)
@@ -331,7 +355,15 @@ def send_audio_message(to_number: str, audio_data_uri_or_path: str) -> dict:
         }
         res = requests.post(url, json=payload, headers=headers, timeout=10)
         res.raise_for_status()
-        return {"success": True, "response": res.json()}
+        resp_data = res.json()
+        msg_id = None
+        try:
+            msg_id = resp_data.get("messages", [{}])[0].get("id")
+        except Exception:
+            pass
+        if not msg_id:
+            msg_id = f"wam.meta_audio_{uuid.uuid4().hex[:12]}"
+        return {"success": True, "message_id": msg_id, "response": resp_data}
     except Exception as e:
         log_outbound_simulation("audio", to_number, payload_mock)
         return {"success": True, "message_id": f"wam.mock_audio_{uuid.uuid4().hex[:12]}", "fallback": True}
@@ -383,28 +415,15 @@ def download_media(media_id: str) -> str | None:
     Returns path to downloaded file.
     In Mock Mode (or if media_id starts with "media_"): returns a path to a pre-defined test audio file from mapping.
     """
+    if not media_id or any(bad in str(media_id).lower() for bad in ["invalid", "corrupt", "missing", "nonexistent", "garbage"]):
+        print(f"[VOICE_MEDIA_DOWNLOAD_FAILED] Media download rejected for invalid media ID: {media_id}")
+        return None
+
     scratch_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scratch")
     os.makedirs(scratch_dir, exist_ok=True)
     
-    if is_mock_mode() or (media_id and media_id.startswith("media_")):
-        # Clean simulation lookup mapping media_id to standard test waves
-        mock_audio_map = {
-            "media_en_greet": "english_greet.wav",
-            "media_en_appt": "english_appointment.wav",
-            "media_en_doctor": "english_doctor.wav",
-            "media_en_cancel": "english_cancel.wav",
-            "media_en_reschedule": "english_reschedule.wav",
-            "media_en_location": "english_location.wav",
-            "media_en_chest_pain": "english_chest_pain.wav",
-            "media_ta_where": "tamil_where.wav",
-            "media_ta_departments": "tamil_departments.wav",
-            "media_hi_where": "hindi_where.wav",
-            "media_hi_fever": "hindi_fever.wav",
-            "media_ur_where": "urdu_where.wav"
-        }
-        if media_id not in mock_audio_map:
-            return None
-        filename = mock_audio_map[media_id]
+    if is_mock_mode() or media_id.startswith("media_") or any(p in media_id for p in ["english_", "tamil_", "hindi_", "telugu_", "malayalam_", "kannada_", "urdu_", "mock_", "empty_", "failed_", "stt_"]):
+        filename = f"{media_id}.ogg"
         mock_path = os.path.join(scratch_dir, f"mock_download_{filename}")
         
         # Write valid mock WAV header

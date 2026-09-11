@@ -50,10 +50,10 @@ import agent.llm_service as llm_service
 # Controlled Department Mapping Layer (Must match DB department_name)
 DEPARTMENT_SYMPTOM_MAP = {
     "Dermatology": [
-        "hair loss", "hair fall", "hair fal", "losing hair", "hair falling", "hair problem",
+        "hair loss", "hair fall", "hair fal", "losing hair", "hair falling", "hair problem", "hair fall problem", "hair loss problem",
         "hair shedding", "hair is falling", "hair falls", "my hair is falling",
         "losing my hair", "am losing my hair", "i am losing my hair",
-        "hair coming out", "hair came out", "hair drop", "thinning hair",
+        "hair coming out", "hair came out", "hair drop", "thinning hair", "hair thinning",
         "going bald", "getting bald",
         "bald", "baldness", "bald patches", "dandruff",
         "acne", "pimples", "pimpls", "skin rash", "skin allergy", "skin problem", "skinn",
@@ -78,9 +78,9 @@ DEPARTMENT_SYMPTOM_MAP = {
         "leg pain", "shoulder pain", "arthritis", "spine pain"
     ],
     "ENT": [
-        "nose pain", "nos pain", "nos is payning", "noseache", "nose problem", "nasal pain", "nasel pain", "nose", "nos",
-        "ear pain", "eare pain", "earache", "hearing problem", "hearing loss",
-        "sinus", "sinusitis", "throat problem", "thorat problem", "sore throat", "tonsils",
+        "nose pain", "nos pain", "nos is payning", "noseache", "nose problem", "nasal pain", "nasel pain", "nose", "nos", "pain in nose", "pain in my nose", "my nose hurts", "i have nose pain",
+        "ear pain", "eare pain", "earache", "ear bleeding", "bleeding from ear", "bleeding ear", "hearing problem", "hearing loss",
+        "sinus", "sinusitis", "throat problem", "thorat problem", "throat pain", "sore throat", "tonsils", "my throat hurts", "throat is hurting",
         "nasal congestion", "running nose"
     ],
     "Gynecology": [

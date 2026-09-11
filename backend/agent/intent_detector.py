@@ -296,7 +296,7 @@ def detect_intent(text: str, current_intent: str = None) -> str:
       6. Other intents in priority order
       7. If in an active workflow and no clear intent shift — preserve current intent
     """
-    text_lower = text.lower().strip()
+    text_lower = (text or "").lower().strip()
 
     # --- Priority 0: Emergency --- Always checked regardless of context
     for pattern in PATTERNS["EMERGENCY_GUIDANCE"]:

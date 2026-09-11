@@ -170,7 +170,7 @@ TRANSLATIONS = {
 
 def detect_language_shift(text: str) -> str:
     """Detects if the user requested a language change in their message."""
-    text_lower = text.lower().strip()
+    text_lower = (text or "").lower().strip()
     
     mapping = {
         "english": "ENGLISH",

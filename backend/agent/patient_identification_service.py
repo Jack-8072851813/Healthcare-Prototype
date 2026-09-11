@@ -180,7 +180,10 @@ def get_dependents_for_parent(parent_patient_id: Optional[int], whatsapp_number:
         return []
 
     w_phone = (whatsapp_number or "").strip()
-    p_id = parent_patient_id if (parent_patient_id and parent_patient_id > 0) else -1
+    try:
+        p_id = int(parent_patient_id) if parent_patient_id is not None else -1
+    except (ValueError, TypeError):
+        p_id = -1
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:

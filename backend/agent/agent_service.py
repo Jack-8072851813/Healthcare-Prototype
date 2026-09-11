@@ -45,6 +45,28 @@ def format_time_12h(time_str: str) -> str:
     except Exception:
         return str(time_str)
 
+def format_safe_dob(pat_dob_raw) -> str:
+    """Formats a DOB string safely. Returns 'Not provided' if raw value is not a valid date."""
+    if not pat_dob_raw or str(pat_dob_raw).strip() in ["-", "None", "null", "Not provided"]:
+        return "Not provided"
+    try:
+        is_v, norm_d, _ = date_normalizer.validate_dob(str(pat_dob_raw).strip(), allow_ambiguous=True)
+        if is_v and norm_d:
+            d_obj = datetime.datetime.strptime(norm_d, "%Y-%m-%d").date()
+            return d_obj.strftime("%d-%b-%Y")
+    except Exception:
+        pass
+    return "Not provided"
+
+def format_safe_gender(gender_raw) -> str:
+    """Formats gender safely. Returns '-' if missing or invalid."""
+    if not gender_raw or str(gender_raw).strip() in ["-", "None", "null"]:
+        return "-"
+    g = str(gender_raw).strip().capitalize()
+    if g in ["Male", "Female", "Other"]:
+        return g
+    return "-"
+
 def get_specialist_titles(d_name: str) -> tuple:
     mapping = {
         "Dermatology": ("Dermatologist", "Dermatologists"),
@@ -56,7 +78,276 @@ def get_specialist_titles(d_name: str) -> tuple:
         "Gynecology": ("Gynecologist", "Gynecologists"),
         "Neurology": ("Neurologist", "Neurologists")
     }
-    return mapping.get(d_name, ("Specialist", "Specialists"))
+    return mapping.get(d_name, (f"{d_name} Specialist" if d_name else "Specialist", f"{d_name} Specialists" if d_name else "Specialists"))
+
+def sync_selected_doctor_state(state: dict, doctor_id: int):
+    """
+    Ensures selected_doctor_id, selected_doctor_name, selected_department_id, and
+    selected_department_name are synchronized with DB ground truth in conversation state.
+    """
+    if not doctor_id:
+        return
+    try:
+        doc_info = resolve_doctor_details(int(doctor_id))
+        if doc_info and doc_info.get("name"):
+            state["selected_doctor_id"] = int(doctor_id)
+            state["selected_doctor_name"] = doc_info["name"]
+            dept_id = doc_info.get("department_id")
+            if dept_id:
+                state["selected_department_id"] = dept_id
+                state.setdefault("entities", {})["department_id"] = dept_id
+            state["selected_department_name"] = doc_info.get("department")
+            state.setdefault("entities", {})["doctor_id"] = int(doctor_id)
+    except Exception as e:
+        print(f"[SYNC_DOCTOR_STATE_ERR] Failed to sync doctor state for id={doctor_id}: {e}")
+
+def restore_selected_doctor_state(state: dict):
+    """
+    Restores doctor_id and department_id into state["entities"] if selected_doctor_id exists.
+    """
+    sel_doc_id = state.get("selected_doctor_id") or state.get("entities", {}).get("doctor_id")
+    if sel_doc_id:
+        sync_selected_doctor_state(state, sel_doc_id)
+
+def validate_and_enforce_selected_doctor(conversation_code: str, state: dict, response_payload: dict) -> dict:
+    """
+    Stale context / mismatch protection guard:
+    Ensures that if selected_doctor_id is active in state, response_payload does NOT reference
+    a different doctor (context leakage). If a mismatch is detected, rebuilds the response
+    specifically for the active selected doctor.
+    """
+    if not isinstance(response_payload, dict) or not response_payload.get("response"):
+        return response_payload
+
+    sel_doc_id = state.get("selected_doctor_id") or state.get("entities", {}).get("doctor_id")
+    if not sel_doc_id:
+        return response_payload
+
+    try:
+        doc_info = resolve_doctor_details(int(sel_doc_id))
+        if not doc_info or not doc_info.get("name"):
+            return response_payload
+            
+        resp_text = response_payload.get("response", "")
+        
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        other_docs = []
+        try:
+            cur.execute("SELECT display_name FROM doctors WHERE id != %s AND status = 'ACTIVE';", (int(sel_doc_id),))
+            other_docs = [r[0] for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+
+        mismatch = False
+        for other_name in other_docs:
+            if other_name in resp_text and doc_info["name"] not in resp_text:
+                mismatch = True
+                print(f"[CONTEXT_GUARD_ALERT] Intercepted doctor mismatch! Response mentioned '{other_name}' instead of selected doctor '{doc_info['name']}'. Rebuilding response for selected doctor!")
+                break
+
+        if mismatch:
+            current_lang = state.get("language", "ENGLISH")
+            intent = state.get("intent", "DOCTOR_AVAILABILITY")
+            appt_date = state.get("entities", {}).get("appointment_date")
+            if appt_date:
+                res_slots = tool_registry.tool_get_available_slots(conversation_code, int(sel_doc_id), appt_date)
+                slots_list = res_slots.get("slots", []) if res_slots.get("success") else []
+                if slots_list:
+                    return build_verified_slot_selection_response(conversation_code, state, int(sel_doc_id), doc_info, appt_date, slots_list, current_lang=current_lang, intent=intent)
+                else:
+                    return build_verified_date_selection_response(conversation_code, state, int(sel_doc_id), doc_info, failed_date=appt_date, current_lang=current_lang, intent=intent)
+            else:
+                return build_verified_date_selection_response(conversation_code, state, int(sel_doc_id), doc_info, current_lang=current_lang, intent=intent)
+    except Exception as e:
+        print(f"[VALIDATE_DOCTOR_ERR] Error in validate_and_enforce_selected_doctor: {e}")
+
+    return response_payload
+
+
+def get_verified_doctor_available_dates(conversation_code: str, doctor_id: int, start_offset: int = 1, max_days: int = 21, limit: int = 4) -> list:
+    """
+    Queries actual availability for a doctor over future dates.
+    Returns ONLY dates that have at least 1 real available slot in DB.
+    Each item: {"date": "YYYY-MM-DD", "title": "Fri, Sep 11", "slots": [...], "count": int}
+    """
+    import datetime
+    import pytz
+    ist = pytz.timezone("Asia/Kolkata")
+    today = datetime.datetime.now(ist).date()
+    valid_dates = []
+    
+    for offset in range(start_offset, max_days + 1):
+        d_obj = today + datetime.timedelta(days=offset)
+        d_str = d_obj.strftime("%Y-%m-%d")
+        res = tool_registry.tool_get_available_slots(conversation_code, doctor_id, d_str)
+        slots = res.get("slots", []) if res.get("success") else []
+        if slots:
+            valid_dates.append({
+                "date": d_str,
+                "title": d_obj.strftime("%a, %b %d"),
+                "slots": slots,
+                "count": len(slots)
+            })
+            if len(valid_dates) >= limit:
+                break
+    return valid_dates
+
+
+def build_verified_slot_selection_response(conversation_code: str, state: dict, doc_id: int, doc_info: dict, target_date: str, slots_list: list, details_header: str = "", current_lang: str = "ENGLISH", intent: str = "BOOK_APPOINTMENT") -> dict:
+    """
+    Renders slot selection response for a validated target_date with non-empty slots_list.
+    If len(slots_list) == 1, auto-selects slot and proceeds directly to confirmation!
+    """
+    import datetime
+    if len(slots_list) == 1:
+        single_slot = slots_list[0]
+        state["entities"]["appointment_date"] = target_date
+        state["entities"]["appointment_time"] = single_slot
+        state["confirmation_pending"] = True
+        state["conversation_state"] = "CONFIRMATION_REQUIRED"
+        
+        # Build confirmation details
+        pat_id = state.get("dependent_patient_id") or state.get("patient_id")
+        pat_name = state["entities"].get("patient_name_override") or state.get("dependent_name")
+        db_dob = None
+        db_gender = None
+        if pat_id:
+            conn = db_config.get_db_connection()
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT first_name, last_name, date_of_birth, gender FROM patients WHERE id = %s;", (pat_id,))
+                p_row = cur.fetchone()
+                if p_row:
+                    if not pat_name:
+                        pat_name = f"{p_row[0]} {p_row[1] or ''}".strip()
+                    db_dob = p_row[2]
+                    db_gender = p_row[3]
+            finally:
+                cur.close()
+                conn.close()
+
+        pat_dob_raw = state["entities"].get("patient_dob") or state.get("dependent_dob") or state.get("registration_fields", {}).get("date_of_birth") or db_dob
+        pat_dob_val = format_safe_dob(pat_dob_raw)
+        pat_gender_raw = state["entities"].get("gender") or state.get("dependent_gender") or state.get("registration_fields", {}).get("gender") or db_gender
+        pat_gender_val = format_safe_gender(pat_gender_raw)
+
+        rel_val = state.get("patient_relationship") or state.get("entities", {}).get("relationship")
+        rel_line = f"Relationship: {str(rel_val).capitalize()}\n" if rel_val and state.get("appointment_for") != "SELF" else ""
+        reason = state["entities"].get("reason") or "General Consultation"
+
+        response_text = (
+            f"Please confirm your appointment:\n\n"
+            f"Patient: {pat_name or 'Patient'}\n"
+            f"DOB: {pat_dob_val}\n"
+            f"{rel_line}"
+            f"Gender: {pat_gender_val}\n"
+            f"Reason: {reason}\n"
+            f"Department: {doc_info['department']}\n"
+            f"Doctor: {doc_info['name']}\n"
+            f"Date: {target_date}\n"
+            f"Time: {format_time_12h(single_slot)}"
+        )
+        confirm_buttons = [
+            {"id": "btn_confirm_appt", "title": "Confirm Appointment"},
+            {"id": "btn_change_appt", "title": "Change Details"},
+            {"id": "btn_cancel_appt", "title": "Cancel"}
+        ]
+        state["interactive_buttons"] = confirm_buttons
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
+        return {
+            "response": response_text,
+            "intent": intent,
+            "language": current_lang,
+            "interactive_buttons": confirm_buttons
+        }
+
+    # Multiple slots available -> Show slot buttons
+    state["entities"]["appointment_date"] = target_date
+    state["conversation_state"] = "TIME_SELECTION"
+    state["confirmation_pending"] = False
+
+    header_prefix = f"{details_header}\n\n" if details_header else ""
+    formatted_slots = [format_time_12h(s) for s in slots_list]
+    slots_text = "\n• ".join(formatted_slots)
+    response_text = (
+        f"{header_prefix}"
+        f"📅 *Available time slots for {doc_info['name']} on {target_date}*:\n• {slots_text}\n\n"
+        f"Which time would you prefer to book?"
+    )
+    slot_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in slots_list]
+    state["interactive_buttons"] = slot_buttons
+    state_manager.save_conversation_state(conversation_code, state)
+    log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
+    return {
+        "response": response_text,
+        "intent": intent,
+        "language": current_lang,
+        "interactive_buttons": slot_buttons
+    }
+
+
+def build_verified_date_selection_response(conversation_code: str, state: dict, doc_id: int, doc_info: dict, failed_date: str = None, current_lang: str = "ENGLISH", intent: str = "BOOK_APPOINTMENT") -> dict:
+    """
+    Queries verified future dates for doc_id that have at least 1 available slot.
+    Handles 0 dates, 1 date (auto-advances to slot selection), and >1 dates.
+    """
+    valid_dates = get_verified_doctor_available_dates(conversation_code, doc_id)
+
+    details_parts = [f"👨‍⚕️ *{doc_info['name']}*", f"🏥 *Department*: {doc_info['department']}"]
+    if doc_info.get("qualification"):
+        details_parts.append(f"🎓 *Qualification*: {doc_info['qualification']}")
+    if doc_info.get("experience_years"):
+        details_parts.append(f"💼 *Experience*: {doc_info['experience_years']} years")
+    if doc_info.get("consultation_fee"):
+        fee_val = doc_info['consultation_fee']
+        fee_str = f"₹{fee_val:.0f}" if (isinstance(fee_val, float) and fee_val.is_integer()) or isinstance(fee_val, int) else f"₹{fee_val}"
+        details_parts.append(f"💵 *Consultation Fee*: {fee_str}")
+    details_header = "\n".join(details_parts)
+
+    fail_prefix = f"Sorry, *{doc_info['name']}* has no available slots on *{failed_date}*.\n\n" if failed_date else ""
+
+    if not valid_dates:
+        state["conversation_state"] = "DOCTOR_SELECTION_REQUIRED"
+        state["entities"]["appointment_date"] = None
+        state["entities"]["appointment_time"] = None
+        resp = (
+            f"{details_header}\n\n"
+            f"{fail_prefix}"
+            f"Sorry, *{doc_info['name']}* has no available slots in the upcoming schedule.\n\n"
+            f"📅 Please choose another doctor or contact our hospital desk for assistance."
+        )
+        buttons = []
+        state["interactive_buttons"] = buttons
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, intent, state)
+        return {"response": resp, "intent": intent, "language": current_lang, "interactive_buttons": buttons}
+
+    if len(valid_dates) == 1:
+        # Single available date -> Auto-advance directly!
+        target_date = valid_dates[0]["date"]
+        slots_list = valid_dates[0]["slots"]
+        return build_verified_slot_selection_response(conversation_code, state, doc_id, doc_info, target_date, slots_list, details_header, current_lang, intent)
+
+    # Multiple available dates -> Show verified date buttons
+    state["conversation_state"] = "DATE_REQUIRED"
+    state["entities"]["appointment_date"] = None
+    state["entities"]["appointment_time"] = None
+    date_buttons = [{"id": f"btn_date_{d['date']}", "title": d["title"]} for d in valid_dates]
+    
+    date_list_text = "\n• ".join([f"*{d['title']}* ({d['count']} slots available)" for d in valid_dates])
+    resp = (
+        f"{details_header}\n\n"
+        f"{fail_prefix}"
+        f"📅 *Available dates for {doc_info['name']}*:\n• {date_list_text}\n\n"
+        f"Which date would you prefer to book?"
+    )
+    state["interactive_buttons"] = date_buttons
+    state_manager.save_conversation_state(conversation_code, state)
+    log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, intent, state)
+    return {"response": resp, "intent": intent, "language": current_lang, "interactive_buttons": date_buttons}
 
 def resolve_or_create_child_patient(
     parent_patient_id: int,
@@ -244,18 +535,11 @@ def get_doctor_working_info_and_next_slots(doc_id: int, from_date_str: str) -> d
         cur.close()
         conn.close()
 
-def log_message_to_db(conversation_code: str, sender_type: str, message_text: str, language: str, intent: str, metadata: dict = None):
-    """Inserts a conversation message into the messages table."""
+def log_message_to_db(conversation_code: str, sender_type: str, message_text: str, language: str, intent: str, metadata: dict = None, message_type: str = "TEXT"):
+    """Inserts a conversation message into the messages table in a single query."""
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id FROM conversations WHERE conversation_code = %s;", (conversation_code,))
-        row = cur.fetchone()
-        if not row:
-            return
-        conv_id = row[0]
-        
-        # Valid sender types check constraint
         valid_senders = ['PATIENT', 'AI_AGENT', 'SYSTEM', 'ADMIN', 'DOCTOR']
         db_sender = sender_type if sender_type in valid_senders else 'AI_AGENT'
         
@@ -270,12 +554,17 @@ def log_message_to_db(conversation_code: str, sender_type: str, message_text: st
         }
         db_lang = LANG_MAP.get(str(language).upper(), 'ENGLISH') if language else 'ENGLISH'
 
-        # Write to messages table
+        db_msg_type = (metadata or {}).get("message_type") or message_type or 'TEXT'
+        if db_msg_type not in ['TEXT', 'VOICE', 'SYSTEM']:
+            db_msg_type = 'TEXT'
+
         import json
         cur.execute("""
             INSERT INTO messages (conversation_id, sender_type, message_type, message_text, language, intent, metadata)
-            VALUES (%s, %s, 'TEXT', %s, %s, %s, %s);
-        """, (conv_id, db_sender, message_text, db_lang, intent, json.dumps(metadata) if metadata else None))
+            SELECT id, %s, %s, %s, %s, %s, %s
+            FROM conversations
+            WHERE conversation_code = %s;
+        """, (db_sender, db_msg_type, message_text, db_lang, intent, json.dumps(metadata) if metadata else None, conversation_code))
         conn.commit()
     except Exception as e:
         print("Failed to log message to DB:", str(e))
@@ -284,19 +573,17 @@ def log_message_to_db(conversation_code: str, sender_type: str, message_text: st
         conn.close()
 
 def log_agent_action(conversation_code: str, action_type: str, details: dict = None):
-    """Inserts an audit entry into agent_action_logs table."""
+    """Inserts an audit entry into agent_action_logs table in a single query."""
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, patient_id FROM conversations WHERE conversation_code = %s;", (conversation_code,))
-        row = cur.fetchone()
-        conv_id = row[0] if row else None
-        pat_id = row[1] if row else None
         import json
         cur.execute("""
             INSERT INTO agent_action_logs (conversation_id, patient_id, action_type, action_details)
-            VALUES (%s, %s, %s, %s);
-        """, (conv_id, pat_id, action_type, json.dumps(details) if details else None))
+            SELECT id, patient_id, %s, %s
+            FROM conversations
+            WHERE conversation_code = %s;
+        """, (action_type, json.dumps(details) if details else None, conversation_code))
         conn.commit()
     except Exception as e:
         print(f"Failed to write agent_action_log ({action_type}):", e)
@@ -447,13 +734,18 @@ def fetch_patient_appointments(patient_id: int = None, whatsapp_number: str = No
         conn.close()
 
 
+_DOCTOR_CACHE = {}
+
 def resolve_doctor_details(doctor_id: int) -> dict:
-    """Helper to query doctor name, department, and profile details from the database."""
+    """Helper to query doctor name, department, and profile details from the database (cached in memory)."""
+    if doctor_id in _DOCTOR_CACHE:
+        return _DOCTOR_CACHE[doctor_id]
+
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT d.display_name, dept.department_name, d.specialization, d.qualification, d.experience_years, d.consultation_fee
+            SELECT d.display_name, dept.department_name, d.specialization, d.qualification, d.experience_years, d.consultation_fee, d.department_id
             FROM doctors d
             JOIN departments dept ON d.department_id = dept.id
             WHERE d.id = %s;
@@ -461,15 +753,19 @@ def resolve_doctor_details(doctor_id: int) -> dict:
         row = cur.fetchone()
         if row:
             doc_name = row[0].replace("Dr. Dr.", "Dr.").strip() if row[0] else "Doctor"
-            return {
+            res = {
                 "name": doc_name,
                 "department": row[1],
                 "specialization": row[2] or row[1],
                 "qualification": row[3] or "",
                 "experience_years": row[4] if row[4] is not None else 0,
-                "consultation_fee": float(row[5]) if row[5] is not None else 0.0
+                "consultation_fee": float(row[5]) if row[5] is not None else 0.0,
+                "department_id": row[6]
             }
-        return {"name": "Doctor", "department": "General Medicine", "specialization": "General Medicine", "qualification": "", "experience_years": 0, "consultation_fee": 0.0}
+            _DOCTOR_CACHE[doctor_id] = res
+            return res
+        res = {"name": "Doctor", "department": "General Medicine", "specialization": "General Medicine", "qualification": "", "experience_years": 0, "consultation_fee": 0.0, "department_id": None}
+        return res
     finally:
         cur.close()
         conn.close()
@@ -587,6 +883,32 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             btn_id = "btn_cancel_admission"
         elif m_strip in ["need assistance", "admission assistance", "admission help"]:
             btn_id = "btn_admission_help"
+        # Dynamic doctor / dependent / slot / date buttons — normalise title→ID if needed
+        elif m_strip in ["male", "btn_g_male"]:
+            btn_id = "btn_g_male"
+        elif m_strip in ["female", "btn_g_female"]:
+            btn_id = "btn_g_female"
+        elif m_strip in ["other", "btn_g_other"]:
+            btn_id = "btn_g_other"
+        elif m_strip in ["today", "btn_date_today"]:
+            btn_id = "btn_date_today"
+        elif m_strip in ["tomorrow", "btn_date_tomorrow"]:
+            btn_id = "btn_date_tomorrow"
+        elif m_strip.startswith("btn_date_") or m_strip.startswith("btn_doc_") \
+                or m_strip.startswith("btn_dep_") or m_strip.startswith("btn_slot_"):
+            # Pass structured IDs through unchanged
+            btn_id = m_strip
+        # Change-details field picker buttons
+        elif m_strip in ["change patient name", "btn_chg_name"]:
+            btn_id = "btn_chg_name"
+        elif m_strip in ["change date", "btn_chg_date"]:
+            btn_id = "btn_chg_date"
+        elif m_strip in ["change time", "btn_chg_time"]:
+            btn_id = "btn_chg_time"
+        elif m_strip in ["change doctor", "btn_chg_doctor"]:
+            btn_id = "btn_chg_doctor"
+        elif m_strip in ["change reason", "btn_chg_reason"]:
+            btn_id = "btn_chg_reason"
 
     current_lang = state.get("language", "ENGLISH")
 
@@ -751,7 +1073,315 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 "language": current_lang,
                 "interactive_buttons": state["interactive_buttons"]
             }
-    
+
+    # ── NEW: Dynamic button fast-path handlers ──────────────────────────────────
+    # These handle btn_doc_{id}, btn_dep_{id}, btn_slot_{HH:MM}, btn_date_*, btn_chg_*
+    # They are resolved here BEFORE the LLM router to avoid expensive LLM calls for
+    # simple structured button selections.
+    if btn_id and btn_id.startswith("btn_doc_"):
+        try:
+            pressed_doc_id = int(btn_id.split("btn_doc_")[1])
+        except (ValueError, IndexError):
+            pressed_doc_id = None
+        if pressed_doc_id:
+            print(f"[BUTTON_ROUTING] Doctor button tap: doc_id={pressed_doc_id}")
+            sync_selected_doctor_state(state, pressed_doc_id)
+            doc_info = resolve_doctor_details(pressed_doc_id)
+            state["conversation_state"] = "DOCTOR_SELECTED"
+            state["intent"] = "BOOK_APPOINTMENT"
+            state["booking_stage"] = None
+            state["confirmation_pending"] = False
+            # Show doctor profile + slots for tomorrow (or next verified available date)
+            import pytz
+            import datetime
+            ist = pytz.timezone("Asia/Kolkata")
+            tomorrow_str = (datetime.datetime.now(ist) + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            preserved_date = state["entities"].get("appointment_date")
+            target_date = preserved_date if preserved_date else tomorrow_str
+            state["entities"]["appointment_date"] = target_date
+            state["entities"]["appointment_time"] = None
+
+            details_parts = [f"👨‍⚕️ *{doc_info['name']}*", f"🏥 *Department*: {doc_info['department']}"]
+            if doc_info.get("qualification"):
+                details_parts.append(f"🎓 *Qualification*: {doc_info['qualification']}")
+            if doc_info.get("experience_years"):
+                details_parts.append(f"💼 *Experience*: {doc_info['experience_years']} years")
+            if doc_info.get("consultation_fee"):
+                fee_val = doc_info["consultation_fee"]
+                fee_str = f"₹{fee_val:.0f}" if (isinstance(fee_val, float) and fee_val.is_integer()) or isinstance(fee_val, int) else f"₹{fee_val}"
+                details_parts.append(f"💵 *Consultation Fee*: {fee_str}")
+            details_header = "\n".join(details_parts)
+
+            res_slots = tool_registry.tool_get_available_slots(conversation_code, pressed_doc_id, target_date)
+            slots_list = res_slots.get("slots", []) if res_slots.get("success") else []
+
+            if slots_list:
+                return build_verified_slot_selection_response(conversation_code, state, pressed_doc_id, doc_info, target_date, slots_list, details_header, current_lang, "BOOK_APPOINTMENT")
+            else:
+                return build_verified_date_selection_response(conversation_code, state, pressed_doc_id, doc_info, failed_date=target_date, current_lang=current_lang, intent="BOOK_APPOINTMENT")
+
+    elif btn_id and btn_id.startswith("btn_dep_"):
+        try:
+            pressed_dep_id = int(btn_id.split("btn_dep_")[1])
+        except (ValueError, IndexError):
+            pressed_dep_id = None
+        if pressed_dep_id:
+            print(f"[BUTTON_ROUTING] Dependent button tap: dep_id={pressed_dep_id}")
+            conn = db_config.get_db_connection()
+            cur = conn.cursor()
+            dep_name = None
+            try:
+                cur.execute("SELECT first_name, last_name FROM patients WHERE id = %s AND status = 'ACTIVE';", (pressed_dep_id,))
+                p_row = cur.fetchone()
+                if p_row:
+                    dep_name = f"{p_row[0]} {p_row[1] or ''}".strip()
+            finally:
+                cur.close()
+                conn.close()
+            if dep_name:
+                state["patient_id"] = pressed_dep_id
+                state["dependent_patient_id"] = pressed_dep_id
+                state["dependent_name"] = dep_name
+                state["entities"]["patient_id"] = pressed_dep_id
+                state["entities"]["patient_name_override"] = dep_name
+                state["dependent_collected"] = True
+                state["pending_stage"] = None
+                state["previous_question"] = None
+                resp = (
+                    f"Booking for *{dep_name}* ✅\n\n"
+                    f"Which health problem or symptom would you like to book for?"
+                )
+                state["intent"] = "BOOK_APPOINTMENT"
+                state["booking_stage"] = "AWAITING_SYMPTOM"
+                state["previous_question"] = "ask_booking_symptom"
+                state["interactive_buttons"] = []
+                state_manager.save_conversation_state(conversation_code, state)
+                log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BOOK_APPOINTMENT", state)
+                return {
+                    "response": resp,
+                    "intent": "BOOK_APPOINTMENT",
+                    "language": current_lang,
+                    "interactive_buttons": []
+                }
+
+    elif btn_id and btn_id.startswith("btn_slot_"):
+        try:
+            pressed_time = btn_id.split("btn_slot_")[1]  # e.g. "09:00"
+        except IndexError:
+            pressed_time = None
+        if pressed_time:
+            print(f"[BUTTON_ROUTING] Slot button tap: time={pressed_time}")
+            state["entities"]["appointment_time"] = pressed_time
+            state["intent"] = "BOOK_APPOINTMENT"
+            doc_id = state["entities"].get("doctor_id")
+            appt_date = state["entities"].get("appointment_date")
+            # Validate that the slot is still available
+            slot_valid = False
+            if doc_id and appt_date:
+                res_slots = tool_registry.tool_get_available_slots(conversation_code, doc_id, appt_date)
+                avail = res_slots.get("slots", []) if res_slots.get("success") else []
+                slot_valid = pressed_time in avail
+            if slot_valid:
+                # Move to confirmation
+                state["confirmation_pending"] = True
+                doc_info = resolve_doctor_details(doc_id)
+                pat_id = state.get("dependent_patient_id") or state.get("patient_id")
+                pat_name = state["entities"].get("patient_name_override") or state.get("dependent_name")
+                db_dob = None
+                db_gender = None
+                if pat_id:
+                    conn = db_config.get_db_connection()
+                    cur = conn.cursor()
+                    try:
+                        cur.execute("SELECT first_name, last_name, date_of_birth, gender FROM patients WHERE id = %s;", (pat_id,))
+                        p_row = cur.fetchone()
+                        if p_row:
+                            if not pat_name:
+                                pat_name = f"{p_row[0]} {p_row[1] or ''}".strip()
+                            db_dob = p_row[2]
+                            db_gender = p_row[3]
+                    finally:
+                        cur.close()
+                        conn.close()
+                reason = state["entities"].get("reason") or "General Consultation"
+                pat_dob_raw = state.get("dependent_dob") or db_dob or "-"
+                pat_gender_raw = state.get("dependent_gender") or db_gender or "-"
+                try:
+                    dob_str_clean = str(pat_dob_raw).split("T")[0]
+                    if "-" in dob_str_clean and len(dob_str_clean.split("-")[0]) == 4:
+                        d_obj = datetime.datetime.strptime(dob_str_clean, "%Y-%m-%d").date()
+                        pat_dob_val = d_obj.strftime("%d-%b-%Y")
+                    else:
+                        pat_dob_val = str(pat_dob_raw)
+                except Exception:
+                    pat_dob_val = str(pat_dob_raw)
+                pat_gender_val = str(pat_gender_raw).capitalize() if pat_gender_raw and str(pat_gender_raw) != "-" else "-"
+                resp = (
+                    f"Please confirm your appointment:\n\n"
+                    f"Patient: {pat_name or 'Patient'}\n"
+                    f"DOB: {pat_dob_val}\n"
+                    f"Gender: {pat_gender_val}\n"
+                    f"Reason: {reason}\n"
+                    f"Department: {doc_info['department']}\n"
+                    f"Doctor: {doc_info['name']}\n"
+                    f"Date: {appt_date}\n"
+                    f"Time: {format_time_12h(pressed_time)}"
+                )
+                confirm_buttons = [
+                    {"id": "btn_confirm_appt", "title": "Confirm Appointment"},
+                    {"id": "btn_change_appt", "title": "Change Details"},
+                    {"id": "btn_cancel_appt", "title": "Cancel"}
+                ]
+                state["interactive_buttons"] = confirm_buttons
+                state_manager.save_conversation_state(conversation_code, state)
+                log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BOOK_APPOINTMENT", state)
+                return {
+                    "response": resp,
+                    "intent": "BOOK_APPOINTMENT",
+                    "language": current_lang,
+                    "interactive_buttons": confirm_buttons
+                }
+            else:
+                # Slot is gone — show fresh available slots
+                doc_info = resolve_doctor_details(doc_id) if doc_id else {"name": "Doctor", "department": "General"}
+                state["entities"]["appointment_time"] = None
+                if doc_id and appt_date:
+                    res_slots2 = tool_registry.tool_get_available_slots(conversation_code, doc_id, appt_date)
+                    avail2 = res_slots2.get("slots", []) if res_slots2.get("success") else []
+                    if avail2:
+                        formatted = [format_time_12h(s) for s in avail2]
+                        resp = (
+                            f"Sorry, *{format_time_12h(pressed_time)}* is no longer available.\n\n"
+                            f"📅 Current available slots for {doc_info['name']} on {appt_date}:\n• "
+                            + "\n• ".join(formatted) + "\n\nPlease choose a different time."
+                        )
+                        new_slot_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in avail2]
+                    else:
+                        return build_verified_date_selection_response(conversation_code, state, doc_id, doc_info, failed_date=appt_date, current_lang=current_lang, intent="BOOK_APPOINTMENT")
+                else:
+                    resp = "I couldn't verify the slot. Please try selecting again or type your preferred time."
+                    new_slot_buttons = []
+                state["interactive_buttons"] = new_slot_buttons
+                state_manager.save_conversation_state(conversation_code, state)
+                log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BOOK_APPOINTMENT", state)
+                return {
+                    "response": resp,
+                    "intent": "BOOK_APPOINTMENT",
+                    "language": current_lang,
+                    "interactive_buttons": new_slot_buttons
+                }
+
+    elif btn_id in ["btn_date_today", "btn_date_tomorrow"] or (btn_id and btn_id.startswith("btn_date_")):
+        import pytz
+        import datetime
+        ist = pytz.timezone("Asia/Kolkata")
+        today = datetime.datetime.now(ist).date()
+        if btn_id == "btn_date_today":
+            target_date = today.strftime("%Y-%m-%d")
+        elif btn_id == "btn_date_tomorrow":
+            target_date = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            try:
+                target_date = btn_id.split("btn_date_")[1]  # e.g. "2026-09-15"
+            except IndexError:
+                target_date = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        print(f"[BUTTON_ROUTING] Date button tap: date={target_date}")
+        state["entities"]["appointment_date"] = target_date
+        state["entities"]["appointment_time"] = None
+        state["intent"] = "BOOK_APPOINTMENT"
+        doc_id = state["entities"].get("doctor_id")
+        if doc_id:
+            doc_info = resolve_doctor_details(doc_id)
+            res_slots = tool_registry.tool_get_available_slots(conversation_code, doc_id, target_date)
+            slots_list = res_slots.get("slots", []) if res_slots.get("success") else []
+            if slots_list:
+                return build_verified_slot_selection_response(conversation_code, state, doc_id, doc_info, target_date, slots_list, current_lang=current_lang, intent="BOOK_APPOINTMENT")
+            else:
+                return build_verified_date_selection_response(conversation_code, state, doc_id, doc_info, failed_date=target_date, current_lang=current_lang, intent="BOOK_APPOINTMENT")
+        else:
+            # No doctor yet — just store the date and continue to normal flow
+            pass
+
+    elif btn_id == "btn_change_appt":
+        print("[BUTTON_ROUTING] Change appointment button tap: btn_change_appt")
+        state["confirmation_pending"] = False
+        state["change_pending"] = True
+        resp = "What detail would you like to change?"
+        chg_buttons = [
+            {"id": "btn_chg_doctor", "title": "Doctor"},
+            {"id": "btn_chg_date",   "title": "Date"},
+            {"id": "btn_chg_time",   "title": "Time"},
+            {"id": "btn_chg_reason", "title": "Reason"},
+            {"id": "btn_chg_name",   "title": "Patient Name"},
+        ]
+        state["interactive_buttons"] = chg_buttons
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BOOK_APPOINTMENT", state)
+        return {
+            "response": resp,
+            "intent": "BOOK_APPOINTMENT",
+            "language": current_lang,
+            "interactive_buttons": chg_buttons
+        }
+
+    elif btn_id in ["btn_chg_name", "btn_chg_date", "btn_chg_time", "btn_chg_doctor", "btn_chg_reason"]:
+        print(f"[BUTTON_ROUTING] Change-details button tap: {btn_id}")
+        field_map = {
+            "btn_chg_name":   "patient_name",
+            "btn_chg_date":   "date",
+            "btn_chg_time":   "time",
+            "btn_chg_doctor": "doctor",
+            "btn_chg_reason": "reason",
+        }
+        chosen_field = field_map[btn_id]
+        state["change_pending"] = False
+        state["change_pending_field"] = chosen_field
+        state["confirmation_pending"] = False
+        state["intent"] = "BOOK_APPOINTMENT"
+        if chosen_field == "patient_name":
+            resp = "Please enter the updated *patient full name*:"
+            state["interactive_buttons"] = []
+        elif chosen_field == "date":
+            state["entities"]["appointment_date"] = None
+            state["entities"]["appointment_time"] = None
+            doc_id = state["entities"].get("doctor_id")
+            if doc_id:
+                doc_info = resolve_doctor_details(doc_id)
+                return build_verified_date_selection_response(conversation_code, state, doc_id, doc_info, current_lang=current_lang, intent="BOOK_APPOINTMENT")
+            resp = "Please enter your updated preferred appointment date (e.g. *tomorrow*, *Monday*, *15 Sep*):"
+            state["interactive_buttons"] = []
+        elif chosen_field == "time":
+            state["entities"]["appointment_time"] = None
+            doc_id = state["entities"].get("doctor_id")
+            appt_date = state["entities"].get("appointment_date")
+            slot_buttons = []
+            if doc_id and appt_date:
+                res_alt = tool_registry.tool_get_available_slots(conversation_code, doc_id, appt_date)
+                if res_alt.get("slots"):
+                    slot_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in res_alt["slots"]]
+            resp = "Please choose your updated preferred appointment time:"
+            state["interactive_buttons"] = slot_buttons
+        elif chosen_field == "doctor":
+            state["entities"]["doctor_id"] = None
+            state["entities"]["department_id"] = None
+            state["entities"]["appointment_date"] = None
+            state["entities"]["appointment_time"] = None
+            resp = "Which doctor or department would you like to switch to?"
+            state["interactive_buttons"] = []
+        else:  # reason
+            resp = "Please enter your updated reason for visit:"
+            state["interactive_buttons"] = []
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BOOK_APPOINTMENT", state)
+        return {
+            "response": resp,
+            "intent": "BOOK_APPOINTMENT",
+            "language": current_lang,
+            "interactive_buttons": state["interactive_buttons"]
+        }
+
+    # ── END: Dynamic button fast-path handlers ───────────────────────────────────
+
     # Resolve patient ID from patient_code if passed from the payload
     if not state.get("patient_id") and patient_code:
         conn = db_config.get_db_connection()
@@ -771,39 +1401,45 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             cur.close()
             conn.close()
 
-    # Pre-resolve patient ID & info from active phone using Patient Identification Service
-    try:
-        conn = db_config.get_db_connection()
-        cur = conn.cursor()
-        w_num = None
+    # Pre-resolve patient ID & info from active phone using Patient Identification Service (if not already resolved in state)
+    if not state.get("patient_info") or not state.get("patient_id"):
         try:
-            cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
-            row = cur.fetchone()
-            if row and row[0]:
-                w_num = row[0]
-        finally:
-            cur.close()
-            conn.close()
-
-        if w_num:
-            id_res = patient_id_service.identify_patient_by_phone(w_num)
-            if id_res.get("found") and id_res.get("patient"):
-                p_data = id_res["patient"]
-                state["patient_id"] = p_data["id"]
-                state["entities"]["patient_id"] = p_data["id"]
-                state["patient_info"] = p_data
+            w_num = None
+            if conversation_code and conversation_code.startswith("WA_"):
+                parts = conversation_code.split("_")
+                if len(parts) >= 2 and parts[1].isdigit():
+                    w_num = parts[1]
+            if not w_num:
                 conn = db_config.get_db_connection()
                 cur = conn.cursor()
                 try:
-                    cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (p_data["id"], conversation_code))
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
+                    cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        w_num = row[0]
                 finally:
                     cur.close()
                     conn.close()
-    except Exception as e:
-        print("Failed to auto-resolve patient by phone:", e)
+
+            if w_num:
+                id_res = patient_id_service.identify_patient_by_phone(w_num)
+                if id_res.get("found") and id_res.get("patient"):
+                    p_data = id_res["patient"]
+                    state["patient_id"] = p_data["id"]
+                    state["entities"]["patient_id"] = p_data["id"]
+                    state["patient_info"] = p_data
+                    conn = db_config.get_db_connection()
+                    cur = conn.cursor()
+                    try:
+                        cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (p_data["id"], conversation_code))
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                    finally:
+                        cur.close()
+                        conn.close()
+        except Exception as e:
+            print("Failed to auto-resolve patient by phone:", e)
 
     # Apply override if specified
     if language_override:
@@ -853,7 +1489,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
     # 4. LLM-Powered Intent & Entity Routing (PRIMARY)
     #    Falls back to rule-based engine when LLM is unavailable.
     # ---------------------------------------------------------------------------
-    msg_cleaned = message_text.lower().strip()
+    msg_cleaned = (message_text or "").lower().strip()
     is_affirmative = msg_cleaned in [
         "yes", "sure", "ok", "okay", "please do", "yes please", "yeah", "yup",
         "சரி", "ஆம்", "हाँ", "हाँ जी", "అవును", "ശരി", "അതെ", "ಹೌದು", "جی", "جی ہاں"
@@ -880,14 +1516,15 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         }
 
     # Intercept Booking ID (e.g. APT24321) or AWAITING_BOOKING_ID stage early
+    safe_msg = message_text or ""
     is_awaiting_bid = state.get("pending_stage") == "AWAITING_BOOKING_ID" or state.get("previous_question") == "AWAITING_BOOKING_ID"
     if is_awaiting_bid:
-        m_id = re.search(r"\b(APT-?\d+|\d{4,8})\b", message_text, re.IGNORECASE)
+        m_id = re.search(r"\b(APT-?\d+|\d{4,8})\b", safe_msg, re.IGNORECASE)
     else:
-        m_id = re.search(r"\b(APT-?\d{3,8})\b", message_text, re.IGNORECASE)
+        m_id = re.search(r"\b(APT-?\d{3,8})\b", safe_msg, re.IGNORECASE)
 
     if m_id or is_awaiting_bid:
-        msg_lwr = message_text.lower().strip()
+        msg_lwr = safe_msg.lower().strip()
         cancel_words = ["cancel", "exit", "stop", "back", "never mind", "nevermind"]
         if not any(w in msg_lwr for w in cancel_words):
             if m_id:
@@ -964,7 +1601,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
     ACK_WORDS = {
         "ok", "okay", "thanks", "thank you", "thanks!", "great", "fine", "alright", "k", "sure", "noted"
     }
-    msg_clean_greeting = message_text.lower().strip().rstrip("!.,")
+    msg_clean_greeting = safe_msg.lower().strip().rstrip("!.,")
     is_ack = (msg_clean_greeting in ACK_WORDS) and not state.get("confirmation_pending") and not state.get("pending_stage")
     if state.get("confirmation_pending"):
         detected_intent = "BOOK_APPOINTMENT"
@@ -995,7 +1632,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             "symptoms":        []
         }
     elif state.get("intent") == "REGISTER_PATIENT" or (state.get("booking_stage") or "").startswith("REGISTERING_"):
-        if not any(w in message_text.lower().strip() for w in ["cancel", "exit", "stop", "never mind", "nevermind"]):
+        if not any(w in safe_msg.lower().strip() for w in ["cancel", "exit", "stop", "never mind", "nevermind"]):
             detected_intent = "REGISTER_PATIENT"
 
     # Persist booking_for & relationship for dependent flow (Fix 4 / Bug 1 fix)
@@ -1005,7 +1642,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
     # Use word-boundary regex for dependent keywords so "Wilson" doesn't match "son"
     _dep_kw_pattern = re.compile(r"\b(son|daughter|child|kid|wife|husband|mother|father|mom|dad|baby|infant|sibling|brother|sister)\b", re.IGNORECASE)
-    _msg_has_explicit_dep = bool(_dep_kw_pattern.search(message_text))
+    _msg_has_explicit_dep = bool(_dep_kw_pattern.search(safe_msg))
 
     # Only reset dependent state to SELF when:
     #   a) The router explicitly returned booking_for=SELF or appointment_subject=SELF, AND
@@ -1078,11 +1715,14 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
     b_for = _llm_b_for  # Only trust what THIS message's router returned
     rel_val = _llm_rel  # Only trust what THIS message's router returned
 
+    dep_keywords = ["brother", "sister", "sibling", "son", "daughter", "child", "kid", "spouse", "wife", "husband", "father", "mother", "family", "relative"]
+    has_dep_keyword = any(re.search(rf"\bfor my {kw}\b|\b{kw}\b", safe_msg.lower()) for kw in dep_keywords)
     is_booking_context = detected_intent in ["BOOK_APPOINTMENT", "DEPENDENT_BOOKING"] or llm_intent_name in ["BOOK_APPOINTMENT", "DEPENDENT_BOOKING"]
-    is_dep_intent = is_booking_context and (
+    is_dep_intent = (is_booking_context or state.get("pending_stage") in ["AWAITING_DEPENDENT_SELECTION", "REGISTERING_NEW_DEPENDENT"]) and (
         b_for in ["CHILD", "DEPENDENT", "FAMILY_MEMBER"] or
         llm_intent_name == "DEPENDENT_BOOKING" or
-        (rel_val and rel_val.upper() in ["SON", "DAUGHTER", "CHILD", "KID", "SPOUSE", "WIFE", "HUSBAND", "FATHER", "MOTHER"])
+        has_dep_keyword or
+        (rel_val and rel_val.upper() in ["SON", "DAUGHTER", "CHILD", "KID", "SPOUSE", "WIFE", "HUSBAND", "FATHER", "MOTHER", "BROTHER", "SISTER", "SIBLING", "FAMILY_MEMBER", "RELATIVE"])
     )
 
     # Track primary patient ID (account holder / contact)
@@ -1139,20 +1779,42 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
     # 2. User registering details for Case A
     elif state.get("pending_stage") == "REGISTERING_NEW_DEPENDENT":
-        rel_hint = rel_val or state.get("patient_relationship") or "child"
+        msg_l = message_text.lower().strip()
+        if msg_l == "btn_self" or "myself" in msg_l or "for me" in msg_l or b_for == "SELF":
+            state["pending_stage"] = None
+            state["dependent_collection_substage"] = None
+            state["booking_for"] = "SELF"
+            state["appointment_for"] = "SELF"
+            if state.get("primary_patient_id"):
+                state["patient_id"] = state["primary_patient_id"]
+                state["entities"]["patient_id"] = state["primary_patient_id"]
+            state.pop("dependent_patient_id", None)
+            state.pop("dependent_name", None)
+            state.pop("dependent_dob", None)
+            state.pop("dependent_gender", None)
+            state["entities"].pop("patient_name_override", None)
+            state["entities"].pop("patient_dob", None)
+
+        rel_hint = rel_val or state.get("patient_relationship") or state.get("entities", {}).get("relationship") or "family member"
         dep_name = state.get("dependent_name") or llm_route.get("patient_name")
-        dep_dob = state.get("dependent_dob") or llm_route.get("date_of_birth")
+        dep_dob_raw = state.get("dependent_dob") or llm_route.get("date_of_birth")
+        dep_dob = None
+        if dep_dob_raw:
+            norm_d, _, _ = date_normalizer.parse_and_normalize_date(str(dep_dob_raw))
+            if norm_d and date_normalizer.validate_dob(norm_d):
+                dep_dob = norm_d
         dep_gender = state.get("dependent_gender") or llm_route.get("gender")
 
         raw_msg = message_text.strip()
         if not dep_name or not dep_dob or not dep_gender:
-            parts = [p.strip() for p in raw_msg.split(",") if p.strip()]
+            parts = [p.strip() for p in re.split(r'[\n,]+', raw_msg) if p.strip()]
             if len(parts) >= 3:
                 if not dep_name:
                     dep_name = parts[0]
                 if not dep_dob:
-                    is_v, norm_d, _ = date_normalizer.parse_and_normalize_date(parts[1])
-                    dep_dob = norm_d or parts[1]
+                    norm_d, _, _ = date_normalizer.parse_and_normalize_date(parts[1])
+                    if norm_d and date_normalizer.validate_dob(norm_d):
+                        dep_dob = norm_d
                 if not dep_gender:
                     m_l = parts[2].lower()
                     dep_gender = "Female" if "female" in m_l or "girl" in m_l else ("Male" if "male" in m_l or "boy" in m_l else "Other")
@@ -1163,8 +1825,11 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             state["dependent_name"] = dep_name
         elif sub_stage == "DOB" and not dep_dob:
             is_v, norm_d, _ = date_normalizer.parse_and_normalize_date(raw_msg)
-            dep_dob = norm_d or raw_msg
-            state["dependent_dob"] = dep_dob
+            if is_v and norm_d and date_normalizer.validate_dob(norm_d):
+                dep_dob = norm_d
+                state["dependent_dob"] = dep_dob
+            else:
+                dep_dob = None
         elif sub_stage == "GENDER" and not dep_gender:
             m_l = raw_msg.lower()
             dep_gender = "Female" if "female" in m_l or "girl" in m_l else ("Male" if "male" in m_l or "boy" in m_l else "Other")
@@ -1217,6 +1882,20 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         state["pending_stage"] = None
         state["dependent_collection_substage"] = None
 
+        rel_label = rel_hint.lower()
+        resp_done = (
+            f"✅ *{dep_name}* has been registered successfully as your {rel_label}.\n\n"
+            f"What health problem, symptom, or cause would {dep_name} like to consult the doctor for?"
+        )
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", resp_done, current_lang, "BOOK_APPOINTMENT", state)
+        return {
+            "response": resp_done,
+            "intent": "BOOK_APPOINTMENT",
+            "language": current_lang,
+            "interactive_buttons": []
+        }
+
     if is_dep_intent and not state.get("dependent_collected"):
         state["patient_relationship"] = rel_val
         if not state.get("appointment_for") or state.get("appointment_for") == "SELF":
@@ -1244,7 +1923,12 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 # CASE A: 0 MATCHING DEPENDENTS
                 if len(matching_deps) == 0:
                     extracted_name = llm_route.get("patient_name")
-                    extracted_dob = llm_route.get("date_of_birth")
+                    extracted_dob_raw = llm_route.get("date_of_birth")
+                    extracted_dob = None
+                    if extracted_dob_raw:
+                        is_v, norm_d, _ = date_normalizer.parse_and_normalize_date(str(extracted_dob_raw))
+                        if is_v and norm_d and date_normalizer.validate_dob(norm_d):
+                            extracted_dob = norm_d
                     extracted_gender = llm_route.get("gender")
 
                     if extracted_name and extracted_dob and extracted_gender:
@@ -1404,10 +2088,8 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             "interactive_buttons": state["interactive_buttons"],
         }
 
-    # ── GROUNDING VALIDATION — gate all LLM output before touching state ─────
-    # The grounding_validator is the single authoritative filter between raw LLM
-    # extraction and conversation state.  Nothing from llm_route may be written
-    # to state without passing through here first.
+    # ── Grounding validation — gate all LLM output before touching state ─────
+    is_change_doc_req = any(kw in (message_text or "").lower() for kw in ["change doctor", "choose another doctor", "different doctor", "select another doctor", "another doctor", "different dr", "change dr"])
     pending_stage = state.get("booking_stage") or ""
     grounding_result = grounding_validator.validate_extraction(
         user_message=message_text,
@@ -1422,6 +2104,26 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
     for log_entry in grounding_result["grounding_log"]:
         pass  # Already printed inside grounding_validator
 
+    # ── Check for new symptom / department to clear stale doctor & date ───────
+    has_new_symptom_or_dept = bool(cleaned_fields.get("medical_reason") or cleaned_fields.get("department") or cleaned_fields.get("symptoms"))
+    if has_new_symptom_or_dept:
+        target_dept = cleaned_fields.get("department") or state.get("department_name")
+        curr_doc_id = state.get("selected_doctor_id") or state.get("entities", {}).get("doctor_id")
+        if curr_doc_id and target_dept:
+            doc_info = resolve_doctor_details(int(curr_doc_id))
+            if doc_info and doc_info.get("department") and doc_info["department"].lower() != target_dept.lower():
+                print(f"[DOCTOR_REVALIDATION] Clearing stale doctor {doc_info['name']} ({doc_info['department']}) for new department {target_dept}")
+                state["selected_doctor_id"] = None
+                state["selected_doctor_name"] = None
+                state["doctor_name"] = None
+                if isinstance(state.get("entities"), dict):
+                    state["entities"]["doctor_id"] = None
+        # If new symptom/department was provided without an explicit date, clear stale date & time
+        if not cleaned_fields.get("appointment_date") and not is_change_doc_req:
+            if isinstance(state.get("entities"), dict):
+                state["entities"]["appointment_date"] = None
+                state["entities"]["appointment_time"] = None
+
     # ── Merge validated fields into state via conversation_stages ────────────
     previous_intent_for_merge = state.get("intent", "GREETING")
     conversation_stages.merge_state(
@@ -1430,6 +2132,28 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         intent=detected_intent,
         previous_intent=previous_intent_for_merge,
     )
+
+    # ── Restore / Sync Selected Doctor State if active and NOT explicit change doctor ──
+    if is_change_doc_req:
+        state["selected_doctor_id"] = None
+        state["selected_doctor_name"] = None
+        if "doctor_id" in state.get("entities", {}):
+            state["entities"]["doctor_id"] = None
+    elif state.get("selected_doctor_id") or state.get("entities", {}).get("doctor_id"):
+        curr_doc_id = state.get("selected_doctor_id") or state.get("entities", {}).get("doctor_id")
+        if curr_doc_id and state.get("department_name"):
+            doc_info = resolve_doctor_details(int(curr_doc_id))
+            if doc_info and doc_info.get("department") and doc_info["department"].lower() != state["department_name"].lower():
+                print(f"[DOCTOR_REVALIDATION] Clearing stale doctor {doc_info['name']} ({doc_info['department']}) inconsistent with {state['department_name']}")
+                state["selected_doctor_id"] = None
+                state["selected_doctor_name"] = None
+                state["doctor_name"] = None
+                if "doctor_id" in state.get("entities", {}):
+                    state["entities"]["doctor_id"] = None
+            else:
+                restore_selected_doctor_state(state)
+        else:
+            restore_selected_doctor_state(state)
 
     # ── Apply period-to-time mapping for appointment_time ────────────────────
     PERIOD_TO_TIME = {
@@ -2185,17 +2909,18 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
     elif intent == "DOCTOR_AVAILABILITY":
         state["interactive_buttons"] = []
-        # Clear stale doctor_id ONLY if we are NOT mid-booking and message has no doctor reference
-        # If a booking was already in progress (doctor previously selected), preserve the doctor_id
-        was_booking = previous_intent_for_merge == "BOOK_APPOINTMENT" or state.get("conversation_state") in [
-            "DOCTOR_SELECTION_REQUIRED", "TIME_SELECTION", "DATE_REQUIRED"
-        ]
-        if extracted.get("doctor_id"):
-            state["entities"]["doctor_id"] = extracted["doctor_id"]
-        elif not llm_route.get("doctor_name") and not ("dr." in message_text.lower() or "dr " in message_text.lower()):
-            if not was_booking:
-                # Only clear if we weren't mid-booking
-                state["entities"]["doctor_id"] = None
+        msg_lower = (message_text or "").lower()
+        is_change_doc_req = any(kw in msg_lower for kw in ["change doctor", "another doctor", "different doctor", "switch doctor", "show another doctor"])
+
+        if is_change_doc_req:
+            state["selected_doctor_id"] = None
+            state["selected_doctor_name"] = None
+            state["entities"]["doctor_id"] = None
+            sel_doc_id = None
+        else:
+            sel_doc_id = extracted.get("doctor_id") or state.get("selected_doctor_id") or state["entities"].get("doctor_id")
+            if sel_doc_id:
+                sync_selected_doctor_state(state, sel_doc_id)
         
         # Clear stale/historical date (e.g. birth dates) from appointment_date
         appt_date = state["entities"].get("appointment_date")
@@ -2216,6 +2941,11 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         #   - No date supplied → show the doctor's weekly working schedule (explicit availability request)
         #   - Date supplied    → show available slots for that specific date
         if doc_id:
+            sync_selected_doctor_state(state, doc_id)
+            doc_info = resolve_doctor_details(doc_id)
+            dept_id = doc_info["department_id"]
+            state["entities"]["department_id"] = dept_id
+
             if not appt_date:
                 # User asked "show doctor availability" / "when is he available?" without a date.
                 # Show the doctor's configured weekly schedule from doctor_schedules table.
@@ -2224,14 +2954,13 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 state["intent"] = "DOCTOR_AVAILABILITY"
                 state_manager.save_conversation_state(conversation_code, state)
                 log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, "DOCTOR_AVAILABILITY", state)
-                return {
+                return validate_and_enforce_selected_doctor(conversation_code, state, {
                     "response": response_text,
                     "intent": "DOCTOR_AVAILABILITY",
                     "language": current_lang,
                     "interactive_buttons": []
-                }
+                })
 
-            doc_info = resolve_doctor_details(doc_id)
             res_slots = tool_registry.tool_get_available_slots(conversation_code, doc_id, appt_date)
             slots_list = res_slots.get("slots", []) if res_slots.get("success") else []
 
@@ -2261,22 +2990,19 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                         _cur.close()
                         _conn.close()
                 reason = state["entities"].get("reason") or "General Consultation"
-                pat_dob_raw = state["entities"].get("patient_dob") or state.get("dependent_dob") or db_dob or "-"
-                pat_gender_raw = state["entities"].get("gender") or state.get("dependent_gender") or db_gender or "-"
-                try:
-                    dob_str_clean = str(pat_dob_raw).split("T")[0]
-                    if "-" in dob_str_clean and len(dob_str_clean.split("-")[0]) == 4:
-                        d_obj = datetime.datetime.strptime(dob_str_clean, "%Y-%m-%d").date()
-                        pat_dob_val = d_obj.strftime("%d-%b-%Y")
-                    else:
-                        pat_dob_val = str(pat_dob_raw)
-                except Exception:
-                    pat_dob_val = str(pat_dob_raw)
-                pat_gender_val = str(pat_gender_raw).capitalize() if pat_gender_raw and str(pat_gender_raw) != "-" else "-"
+                pat_dob_raw = state["entities"].get("patient_dob") or state.get("dependent_dob") or db_dob
+                pat_dob_val = format_safe_dob(pat_dob_raw)
+                pat_gender_raw = state["entities"].get("gender") or state.get("dependent_gender") or db_gender
+                pat_gender_val = format_safe_gender(pat_gender_raw)
+
+                rel_val_card = state.get("patient_relationship") or state.get("entities", {}).get("relationship")
+                rel_line = f"Relationship: {str(rel_val_card).capitalize()}\n" if (rel_val_card and state.get("appointment_for") != "SELF") else ""
+
                 response_text = (
                     f"Please confirm your appointment:\n\n"
                     f"Patient: {pat_name or 'Patient'}\n"
                     f"DOB: {pat_dob_val}\n"
+                    f"{rel_line}"
                     f"Gender: {pat_gender_val}\n"
                     f"Reason: {reason}\n"
                     f"Department: {doc_info['department']}\n"
@@ -2291,12 +3017,12 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 ]
                 state_manager.save_conversation_state(conversation_code, state)
                 log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, "BOOK_APPOINTMENT", state)
-                return {
+                return validate_and_enforce_selected_doctor(conversation_code, state, {
                     "response": response_text,
                     "intent": "BOOK_APPOINTMENT",
                     "language": current_lang,
                     "interactive_buttons": state["interactive_buttons"]
-                }
+                })
             else:
                 # Show doctor profile + available slots
                 details_parts = [
@@ -2314,42 +3040,31 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 details_header = "\n".join(details_parts)
 
                 if slots_list:
+                    if not time_in_msg:
+                        res_p = build_verified_slot_selection_response(conversation_code, state, doc_id, doc_info, appt_date, slots_list, details_header, current_lang, intent)
+                        return validate_and_enforce_selected_doctor(conversation_code, state, res_p)
                     formatted_slots = [format_time_12h(s) for s in slots_list]
                     slots_text = "\n• ".join(formatted_slots)
-                    if time_in_msg:
-                        # Time was mentioned but not available
-                        response_text = (
-                            f"*{doc_info['name']}* is not available at *{format_time_12h(time_in_msg)}* on *{appt_date}*.\n\n"
-                            f"📅 *Available time slots for {appt_date}*:\n• {slots_text}\n\n"
-                            f"Please reply with a valid time slot from the list above."
-                        )
-                    else:
-                        response_text = (
-                            f"{details_header}\n\n"
-                            f"📅 *Available time slots for {appt_date}*:\n• {slots_text}\n\n"
-                            f"Which time would you prefer to book?"
-                        )
-                else:
                     response_text = (
-                        f"{details_header}\n\n"
-                        f"Sorry, *{doc_info['name']}* has no available slots on *{appt_date}*. "
-                        f"All slots are fully booked for that day.\n\n"
-                        f"📅 Please try a different date. Which date would you prefer?"
+                        f"*{doc_info['name']}* is not available at *{format_time_12h(time_in_msg)}* on *{appt_date}*.\n\n"
+                        f"📅 *Available time slots for {appt_date}*:\n• {slots_text}\n\n"
+                        f"Please choose a valid time slot from the list above."
                     )
-                state["intent"] = "BOOK_APPOINTMENT"
-                state["previous_question"] = None
-                state["interactive_buttons"] = [
-                    {"id": "btn_book_appt", "title": "Book Appointment"},
-                    {"id": "btn_hosp_info", "title": "Hospital Information"}
-                ]
-                state_manager.save_conversation_state(conversation_code, state)
-                log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
-                return {
-                    "response": response_text,
-                    "intent": "BOOK_APPOINTMENT",
-                    "language": current_lang,
-                    "interactive_buttons": state["interactive_buttons"]
-                }
+                    da_slot_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in slots_list]
+                    state["intent"] = "BOOK_APPOINTMENT"
+                    state["previous_question"] = None
+                    state["interactive_buttons"] = da_slot_buttons
+                    state_manager.save_conversation_state(conversation_code, state)
+                    log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
+                    return validate_and_enforce_selected_doctor(conversation_code, state, {
+                        "response": response_text,
+                        "intent": "BOOK_APPOINTMENT",
+                        "language": current_lang,
+                        "interactive_buttons": da_slot_buttons
+                    })
+                else:
+                    res_p = build_verified_date_selection_response(conversation_code, state, doc_id, doc_info, failed_date=appt_date, current_lang=current_lang, intent=intent)
+                    return validate_and_enforce_selected_doctor(conversation_code, state, res_p)
 
         # Step 1: No department/doctor known yet — ask about symptom or department
         elif not dept_id and not doc_id:
@@ -3084,7 +3799,14 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             elif msg_clean in ["btn_change_appt", "change details", "change"]:
                 state["confirmation_pending"] = False
                 state["change_pending"] = True
-                response_text = "What detail would you like to change? (Patient Name, Doctor, Date, Time, or Reason)"
+                response_text = "What detail would you like to change?"
+                state["interactive_buttons"] = [
+                    {"id": "btn_chg_name",   "title": "Patient Name"},
+                    {"id": "btn_chg_doctor", "title": "Change Doctor"},
+                    {"id": "btn_chg_date",   "title": "Change Date"},
+                    {"id": "btn_chg_time",   "title": "Change Time"},
+                    {"id": "btn_chg_reason", "title": "Change Reason"},
+                ]
             else:
                 response_text = "Please confirm your appointment details using the options below:"
                 state["interactive_buttons"] = [
@@ -3594,27 +4316,15 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                     state["entities"]["appointment_time"] = None
                     if avail_slots:
                         formatted_slots = [format_time_12h(s) for s in avail_slots]
-                        slots_str = ", ".join(formatted_slots)
+                        slots_text = "\n• ".join(formatted_slots)
                         response_text = (
                             f"*{doc_info['name']}* is not available at *{format_time_12h(c_appt_time)}* on *{c_appt_date}*.\n\n"
-                            f"⏰ Available slots for *{doc_info['name']}* on *{c_appt_date}*:\n"
-                            f"• {slots_str}\n\n"
-                            f"Please reply with a valid time slot from the list above."
+                            f"⏰ Available slots for *{doc_info['name']}* on *{c_appt_date}*:\n• {slots_text}\n\n"
+                            f"Please choose a valid time slot from the list above."
                         )
+                        alt_slot_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in avail_slots]
                     else:
-                        state["entities"]["appointment_date"] = None
-                        response_text = (
-                            f"Sorry, *{doc_info['name']}* has no available slots on *{c_appt_date}*.\n\n"
-                            f"📅 Please try a different date. Which date would you prefer?"
-                        )
-                    state_manager.save_conversation_state(conversation_code, state)
-                    log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
-                    return {
-                        "response": response_text,
-                        "intent": "BOOK_APPOINTMENT",
-                        "language": current_lang,
-                        "interactive_buttons": []
-                    }
+                        return build_verified_date_selection_response(conversation_code, state, c_doc_id, doc_info, failed_date=c_appt_date, current_lang=current_lang, intent=intent)
             
             # Sanitize and preserve reason entity
             curr_reason = state["entities"].get("reason")
@@ -3752,21 +4462,26 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                         f"Which time would you prefer to book? Or specify another date."
                     )
                     state["conversation_state"] = "TIME_SELECTION"
+                    stage2_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in slots_list]
                 else:
                     response_text = (
                         f"{details_header}\n\n"
                         f"Sorry, *{doc_info['name']}* has no available slots on *{appt_date}*.\n\n"
-                        f"📅 Please try a different date. Which date would you prefer?"
+                        f"📅 Please try a different date:"
                     )
                     state["conversation_state"] = "DATE_REQUIRED"
-
+                    stage2_buttons = [
+                        {"id": "btn_date_today",    "title": "Today"},
+                        {"id": "btn_date_tomorrow", "title": "Tomorrow"},
+                    ]
+                state["interactive_buttons"] = stage2_buttons
                 state_manager.save_conversation_state(conversation_code, state)
                 log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
                 return {
                     "response": response_text,
                     "intent": "BOOK_APPOINTMENT",
                     "language": current_lang,
-                    "interactive_buttons": []
+                    "interactive_buttons": stage2_buttons
                 }
 
             # --- Stage 3: Preferred Time Required ---
@@ -3783,21 +4498,10 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                         f"Which time would you prefer to book?"
                     )
                     state["conversation_state"] = "TIME_SELECTION"
+                    stage3_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in available_slots]
                 else:
-                    state["entities"]["appointment_date"] = None
-                    response_text = (
-                        f"Sorry, *{doc_info['name']}* has no available slots on *{appt_date}*.\n\n"
-                        f"📅 Please try a different date. Which date would you prefer?"
-                    )
-                    state["conversation_state"] = "DATE_REQUIRED"
-                state_manager.save_conversation_state(conversation_code, state)
-                log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
-                return {
-                    "response": response_text,
-                    "intent": "BOOK_APPOINTMENT",
-                    "language": current_lang,
-                    "interactive_buttons": []
-                }
+                    return build_verified_date_selection_response(conversation_code, state, doc_id, doc_info, failed_date=appt_date, current_lang=current_lang, intent=intent)
+
 
             else:
                 # All required fields present -> check real DB slot availability
@@ -3827,32 +4531,19 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                             cur.close()
                             conn.close()
 
-                    pat_dob_raw = state["entities"].get("patient_dob") or state.get("dependent_dob") or state.get("registration_fields", {}).get("date_of_birth") or db_dob or "-"
-                    pat_gender_raw = state["entities"].get("gender") or state.get("dependent_gender") or state.get("registration_fields", {}).get("gender") or db_gender or "-"
+                    pat_dob_raw = state["entities"].get("patient_dob") or state.get("dependent_dob") or state.get("registration_fields", {}).get("date_of_birth") or db_dob
+                    pat_dob_val = format_safe_dob(pat_dob_raw)
+                    pat_gender_raw = state["entities"].get("gender") or state.get("dependent_gender") or state.get("registration_fields", {}).get("gender") or db_gender
+                    pat_gender_val = format_safe_gender(pat_gender_raw)
 
-                    if pat_dob_raw and str(pat_dob_raw) != "-":
-                        try:
-                            dob_str_clean = str(pat_dob_raw).split("T")[0]
-                            if "-" in dob_str_clean:
-                                parts = dob_str_clean.split("-")
-                                if len(parts) == 3 and len(parts[0]) == 4:
-                                    d_obj = datetime.datetime.strptime(dob_str_clean, "%Y-%m-%d").date()
-                                    pat_dob_val = d_obj.strftime("%d-%b-%Y")
-                                else:
-                                    pat_dob_val = str(pat_dob_raw)
-                            else:
-                                pat_dob_val = str(pat_dob_raw)
-                        except Exception:
-                            pat_dob_val = str(pat_dob_raw)
-                    else:
-                        pat_dob_val = "-"
-
-                    pat_gender_val = str(pat_gender_raw).capitalize() if pat_gender_raw and str(pat_gender_raw) != "-" else "-"
+                    rel_val_card = state.get("patient_relationship") or state.get("entities", {}).get("relationship")
+                    rel_line = f"Relationship: {str(rel_val_card).capitalize()}\n" if (rel_val_card and state.get("appointment_for") != "SELF") else ""
 
                     response_text = (
                         f"Please confirm your appointment:\n\n"
                         f"Patient: {pat_name}\n"
                         f"DOB: {pat_dob_val}\n"
+                        f"{rel_line}"
                         f"Gender: {pat_gender_val}\n"
                         f"Reason: {reason}\n"
                         f"Department: {doc_info['department']}\n"
@@ -3870,32 +4561,31 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                     state["confirmation_pending"] = False
                     if available_slots:
                         formatted_slots = [format_time_12h(s) for s in available_slots]
-                        alt_slots_str = ", ".join(formatted_slots)
+                        alt_slots_text = "\n• ".join(formatted_slots)
                         response_text = (
                             f"*{doc_info['name']}* is not available at *{format_time_12h(appt_time)}* on *{appt_date}*. "
                             f"That slot is already booked.\n\n"
-                            f"⏰ Available slots for *{doc_info['name']}* on *{appt_date}*:\n"
-                            f"• {alt_slots_str}\n\n"
-                            f"Please reply with your preferred time from the list above."
+                            f"⏰ Available slots for *{doc_info['name']}* on *{appt_date}*:\n• {alt_slots_text}\n\n"
+                            f"Please choose your preferred time from the list above."
                         )
+                        alt_confirm_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in available_slots]
                     else:
                         info = get_doctor_working_info_and_next_slots(doc_id, appt_date)
                         state["entities"]["appointment_date"] = None
                         if info.get("next_date"):
                             formatted_next = [format_time_12h(s) for s in info["next_slots"]]
-                            next_str = ", ".join(formatted_next)
+                            next_str = "\n• ".join(formatted_next)
                             response_text = (
                                 f"*{doc_info['name']}* is not scheduled to work on *{appt_date}* ({info['day_name']}).\n"
                                 f"🏥 Working days: *{info['working_days_str']}*.\n\n"
-                                f"📅 Available slots on the next working day (*{info['next_date']}*):\n"
-                                f"• {next_str}\n\n"
+                                f"📅 Available slots on the next working day (*{info['next_date']}*):\n• {next_str}\n\n"
                                 f"Which date or time would you prefer to book?"
                             )
+                            # Offer next-date slots as buttons
+                            state["entities"]["appointment_date"] = info["next_date"]
+                            alt_confirm_buttons = [{"id": f"btn_slot_{s}", "title": format_time_12h(s)} for s in info["next_slots"]]
                         else:
-                            response_text = (
-                                f"Sorry, *{doc_info['name']}* has no available slots on *{appt_date}*.\n\n"
-                                f"📅 Please try a different date. Which date would you prefer?"
-                            )
+                            return build_verified_date_selection_response(conversation_code, state, doc_id, doc_info, failed_date=appt_date, current_lang=current_lang, intent=intent)
 
     elif intent == "DEPENDENT_PATIENT":
         """

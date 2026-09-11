@@ -192,84 +192,88 @@ def get_conversation_state(conversation_code: str, whatsapp_number: str = "91999
 
 def save_conversation_state(conversation_code: str, state_dict: dict):
     """
-    Updates the general conversation attributes (intent, patient_id, language) in the conversations table.
-    Note: The actual state JSON is written to the metadata of the AI's response message in messages.
+    Updates general conversation attributes (intent, patient_id, language) in conversations table,
+    and updates metadata on the latest message in a single query.
     """
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
-        # Query whatsapp_number to allow fallback patient resolution if patient_id is missing or stale
-        cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
-        conv_row = cur.fetchone()
-        wnum = conv_row[0] if conv_row else None
-        
-        # Resolve patient_id to update conversations table safely
         candidate_patient_id = state_dict.get("patient_id")
+        wnum = None
+        # Only query whatsapp_number if patient_id is not already resolved
+        if not candidate_patient_id:
+            if conversation_code and conversation_code.startswith("WA_"):
+                parts = conversation_code.split("_")
+                if len(parts) >= 2 and parts[1].isdigit():
+                    wnum = parts[1]
+            if not wnum:
+                cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+                conv_row = cur.fetchone()
+                wnum = conv_row[0] if conv_row else None
+        
         valid_patient_id = resolve_valid_patient_id(cur, candidate_patient_id, wnum)
         
         state_dict["patient_id"] = valid_patient_id
         if isinstance(state_dict.get("entities"), dict):
             state_dict["entities"]["patient_id"] = valid_patient_id
             
-            LANG_MAP = {
-                'EN': 'ENGLISH', 'ENGLISH': 'ENGLISH',
-                'TA': 'TAMIL', 'TAMIL': 'TAMIL',
-                'HI': 'HINDI', 'HINDI': 'HINDI',
-                'TE': 'TELUGU', 'TELUGU': 'TELUGU',
-                'ML': 'MALAYALAM', 'MALAYALAM': 'MALAYALAM',
-                'KN': 'KANNADA', 'KANNADA': 'KANNADA',
-                'UR': 'URDU', 'URDU': 'URDU'
-            }
-            raw_lang = state_dict.get("language", "ENGLISH")
-            db_language = LANG_MAP.get(str(raw_lang).upper(), 'ENGLISH')
-    
-            # Valid intents matching CHECK constraints in migrations
-            # Map agent-side intents to valid DB intents
-            INTENT_TO_DB = {
-                'DEPENDENT_PATIENT': 'BOOK_APPOINTMENT',
-                'THANK_YOU': 'GREETING',
-                'GOODBYE': 'GREETING',
-                'APPOINTMENT_CONFIRMATION': 'BOOK_APPOINTMENT',
-                'APPOINTMENT_TIME': 'BOOK_APPOINTMENT',
-                'APPOINTMENT_DATE': 'BOOK_APPOINTMENT',
-                'EMERGENCY_GUIDANCE': 'HOSPITAL_INFORMATION',
-                'IDENTIFY_PATIENT': 'GREETING',
-                'POST_BOOKING': 'BOOK_APPOINTMENT',
-                'LANGUAGE_CHANGE': 'GREETING',
-                # REGISTER_PATIENT is not in DB CHECK constraint → map to GREETING
-                'REGISTER_PATIENT': 'GREETING',
-                'UNKNOWN': 'GREETING',
-            }
-            valid_intents = [
-                'GREETING', 'BOOK_APPOINTMENT', 'CANCEL_APPOINTMENT', 'RESCHEDULE_APPOINTMENT', 
-                'APPOINTMENT_STATUS', 'DOCTOR_AVAILABILITY', 'HOSPITAL_INFORMATION', 
-                'DEPARTMENT_INFORMATION', 'SYMPTOM_GUIDANCE', 'PRE_ADMISSION', 'HUMAN_ESCALATION',
-                'REGISTER_PATIENT'
-            ]
-            intent = state_dict.get("intent", "GREETING")
-            db_intent = INTENT_TO_DB.get(intent, intent if intent in valid_intents else 'GREETING')
-    
-            cur.execute("""
-                UPDATE conversations
-                SET patient_id = %s,
-                    language = %s,
-                    current_intent = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE conversation_code = %s;
-            """, (valid_patient_id, db_language, db_intent, conversation_code))
+        LANG_MAP = {
+            'EN': 'ENGLISH', 'ENGLISH': 'ENGLISH',
+            'TA': 'TAMIL', 'TAMIL': 'TAMIL',
+            'HI': 'HINDI', 'HINDI': 'HINDI',
+            'TE': 'TELUGU', 'TELUGU': 'TELUGU',
+            'ML': 'MALAYALAM', 'MALAYALAM': 'MALAYALAM',
+            'KN': 'KANNADA', 'KANNADA': 'KANNADA',
+            'UR': 'URDU', 'URDU': 'URDU'
+        }
+        raw_lang = state_dict.get("language", "ENGLISH")
+        db_language = LANG_MAP.get(str(raw_lang).upper(), 'ENGLISH')
 
-            cur.execute("SELECT id FROM messages WHERE conversation_id = (SELECT id FROM conversations WHERE conversation_code = %s) ORDER BY id DESC LIMIT 1;", (conversation_code,))
-            m_row = cur.fetchone()
-            if m_row:
-                cur.execute("UPDATE messages SET metadata = %s WHERE id = %s;", (json.dumps(state_dict), m_row[0]))
-            else:
-                cur.execute("SELECT id FROM conversations WHERE conversation_code = %s;", (conversation_code,))
-                c_row = cur.fetchone()
-                if c_row:
-                    cur.execute("""
-                        INSERT INTO messages (conversation_id, sender_type, message_type, message_text, metadata)
-                        VALUES (%s, 'SYSTEM', 'TEXT', 'STATE_INIT', %s);
-                    """, (c_row[0], json.dumps(state_dict)))
+        INTENT_TO_DB = {
+            'DEPENDENT_PATIENT': 'BOOK_APPOINTMENT',
+            'THANK_YOU': 'GREETING',
+            'GOODBYE': 'GREETING',
+            'APPOINTMENT_CONFIRMATION': 'BOOK_APPOINTMENT',
+            'APPOINTMENT_TIME': 'BOOK_APPOINTMENT',
+            'APPOINTMENT_DATE': 'BOOK_APPOINTMENT',
+            'EMERGENCY_GUIDANCE': 'HOSPITAL_INFORMATION',
+            'IDENTIFY_PATIENT': 'GREETING',
+            'POST_BOOKING': 'BOOK_APPOINTMENT',
+            'LANGUAGE_CHANGE': 'GREETING',
+            'REGISTER_PATIENT': 'GREETING',
+            'UNKNOWN': 'GREETING',
+        }
+        valid_intents = [
+            'GREETING', 'BOOK_APPOINTMENT', 'CANCEL_APPOINTMENT', 'RESCHEDULE_APPOINTMENT', 
+            'APPOINTMENT_STATUS', 'DOCTOR_AVAILABILITY', 'HOSPITAL_INFORMATION', 
+            'DEPARTMENT_INFORMATION', 'SYMPTOM_GUIDANCE', 'PRE_ADMISSION', 'HUMAN_ESCALATION',
+            'REGISTER_PATIENT'
+        ]
+        intent = state_dict.get("intent", "GREETING")
+        db_intent = INTENT_TO_DB.get(intent, intent if intent in valid_intents else 'GREETING')
+
+        cur.execute("""
+            UPDATE conversations
+            SET patient_id = %s,
+                language = %s,
+                current_intent = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE conversation_code = %s;
+        """, (valid_patient_id, db_language, db_intent, conversation_code))
+
+        # Update metadata on the latest message for this conversation in 1 single query
+        cur.execute("""
+            UPDATE messages
+            SET metadata = %s
+            WHERE id = (
+                SELECT m.id
+                FROM messages m
+                JOIN conversations c ON m.conversation_id = c.id
+                WHERE c.conversation_code = %s
+                ORDER BY m.id DESC
+                LIMIT 1
+            );
+        """, (json.dumps(state_dict), conversation_code))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -277,4 +281,3 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
     finally:
         cur.close()
         conn.close()
-

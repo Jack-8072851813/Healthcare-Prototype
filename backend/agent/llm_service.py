@@ -37,14 +37,14 @@ def _call_gemini_api(prompt: str) -> Optional[str]:
     """Call Gemini REST API generateContent."""
     if not LLM_API_KEY:
         return None
-    model_name = "gemini-2.0-flash" if "2.0" in LLM_MODEL or "2.5" in LLM_MODEL else "gemini-1.5-flash-latest"
+    model_name = LLM_MODEL if LLM_MODEL else "gemini-3.5-flash-lite"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={LLM_API_KEY}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}
     }
     try:
-        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=2.5)
+        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=8.0)
         res.raise_for_status()
         data = res.json()
         candidates = data.get("candidates", [])

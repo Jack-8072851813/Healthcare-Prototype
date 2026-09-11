@@ -1666,7 +1666,7 @@ def get_conversation_messages(conv_id: int, current_user: dict = Depends(get_cur
 
         cur.execute(
             """
-            SELECT id, sender_type, message_type, message_text, language, intent, created_at
+            SELECT id, sender_type, message_type, message_text, language, intent, created_at, metadata
             FROM messages
             WHERE conversation_id = %s
             ORDER BY created_at ASC;

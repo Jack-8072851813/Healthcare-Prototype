@@ -282,6 +282,7 @@ ALWAYS_ACCEPTED_FIELDS = frozenset({
     "booking_for",
     "patient_relationship",
     "condition",
+    "medical_reason",
     "department",
     "reason",
     "symptoms",
@@ -332,7 +333,7 @@ def merge_state(
     is_greeting = intent == "GREETING"
     no_medical_entities = not any(
         validated_fields.get(f)
-        for f in ("condition", "department", "appointment_date", "appointment_time",
+        for f in ("condition", "medical_reason", "department", "appointment_date", "appointment_time",
                   "doctor_name", "reason")
     )
 
@@ -407,6 +408,7 @@ def _accept_field(state: dict, field: str, value: Any, log_fn, permissive: bool 
         "doctor_id":        "doctor_id",
         "department_id":    "department_id",
         "condition":        "reason",     # condition -> stored as reason in entities
+        "medical_reason":   "reason",     # medical_reason -> stored as reason in entities
         "reason":           "reason",
         "symptoms":         "symptoms",
         "booking_id":       "booking_id",
@@ -428,15 +430,19 @@ def _accept_field(state: dict, field: str, value: Any, log_fn, permissive: bool 
     if field in ENTITY_FIELDS:
         entity_key = ENTITY_FIELDS[field]
         existing = state["entities"].get(entity_key)
-        if existing and entity_key == "reason" and value != existing and state.get("change_pending_field") != "reason":
-            log_fn(f"  CARRY  {field} (already set: {existing!r}, ignoring: {value!r})")
+        # When a new valid clinical reason/condition is provided, update state["entities"]["reason"]
+        if entity_key == "reason" and value and value != existing:
+            log_fn(f"  REASON UPDATE {existing!r} -> {value!r}")
+            state["entities"]["reason"] = value
+            if isinstance(value, str) and value.strip():
+                state["entities"]["symptoms"] = [value.strip()]
             return
         # Bug 1 fix: never overwrite a populated list with an empty list.
         # e.g. symptoms=['hair loss'] must NOT be cleared by a doctor-name turn that returns symptoms=[].
         if isinstance(existing, list) and existing and isinstance(value, list) and not value:
             log_fn(f"  CARRY  {field} (preserving non-empty list: {existing!r}, ignoring empty: {value!r})")
             return
-        if existing and not permissive:
+        if existing and not permissive and entity_key not in ("reason", "symptoms"):
             log_fn(f"  CARRY  {field} (already set: {existing!r})")
             return
         state["entities"][entity_key] = value
@@ -448,14 +454,19 @@ def _accept_field(state: dict, field: str, value: Any, log_fn, permissive: bool 
             target(state, value)
         else:
             existing = state.get(target)
-            if existing and not permissive:
+            if target == "department_name" and existing != value:
+                log_fn(f"  DEPT CHANGE {existing!r} -> {value!r}: clearing stale doctor & date selection")
+                state["doctor_name"] = None
+                state["selected_doctor_id"] = None
+                state["selected_doctor_name"] = None
+                state["selected_department_name"] = value
+                if isinstance(state.get("entities"), dict):
+                    state["entities"]["doctor_id"] = None
+                    state["entities"]["appointment_date"] = None
+                    state["entities"]["appointment_time"] = None
+            elif existing and not permissive:
                 log_fn(f"  CARRY  {field} (already set: {existing!r})")
                 return
-            if target == "department_name" and existing and existing != value:
-                log_fn(f"  DEPT CHANGE {existing!r} -> {value!r}: clearing stale doctor selection")
-                state["doctor_name"] = None
-                if "doctor_id" in state.get("entities", {}):
-                    state["entities"]["doctor_id"] = None
             state[target] = value
             log_fn(f"  WRITE  state[{target}] = {value!r}")
 
@@ -464,6 +475,12 @@ def _set_reg_field(state: dict, field: str, value: Any) -> None:
     """Helper: write a field into registration_fields sub-dict."""
     if not isinstance(state.get("registration_fields"), dict):
         state["registration_fields"] = {}
+    if field == "date_of_birth" and value:
+        import agent.date_normalizer as date_normalizer
+        is_v, norm_d, _ = date_normalizer.validate_dob(str(value), allow_ambiguous=True)
+        if not is_v or not norm_d:
+            return  # Do not store non-DOB strings into date_of_birth
+        value = norm_d
     state["registration_fields"][field] = value
 
 

@@ -277,6 +277,50 @@ def validate_extraction(
             _log(f"PASS   patient_name={raw_name!r}", grounding_log)
 
     # ------------------------------------------------------------------
+    # 5b. Validate date_of_birth / patient_dob
+    # ------------------------------------------------------------------
+    for dob_key in ("date_of_birth", "patient_dob"):
+        raw_dob = cleaned.get(dob_key)
+        if raw_dob:
+            val_dob = str(raw_dob).strip()
+            import agent.date_normalizer as date_normalizer
+            is_valid_dob, norm_dob, err_reason = date_normalizer.validate_dob(val_dob, allow_ambiguous=True)
+            if not is_valid_dob or not norm_dob:
+                _log(f"REJECT {dob_key}={val_dob!r} -- not a valid date of birth ({err_reason})", grounding_log)
+                cleaned[dob_key] = None
+                if dob_key not in rejected_fields:
+                    rejected_fields.append(dob_key)
+            else:
+                dob_quote = cleaned.get("dob_raw_quote") or cleaned.get("date_of_birth_raw_quote") or ""
+                if not _is_grounded(val_dob, dob_quote, msg_lower, pending_stage, "REGISTERING_DOB") and pending_stage not in ["REGISTERING_DOB", "REGISTERING_NEW_DEPENDENT"]:
+                    if not _value_mentioned_in_message(val_dob, msg_lower) and not _value_mentioned_in_message(str(raw_dob), msg_lower):
+                        _log(f"REJECT {dob_key}={val_dob!r} -- date of birth not mentioned in current message", grounding_log)
+                        cleaned[dob_key] = None
+                        if dob_key not in rejected_fields:
+                            rejected_fields.append(dob_key)
+                    else:
+                        cleaned[dob_key] = norm_dob
+                        _log(f"PASS   {dob_key}={norm_dob!r}", grounding_log)
+                else:
+                    cleaned[dob_key] = norm_dob
+                    _log(f"PASS   {dob_key}={norm_dob!r}", grounding_log)
+
+    # ------------------------------------------------------------------
+    # 5c. Validate gender
+    # ------------------------------------------------------------------
+    raw_gender = cleaned.get("gender")
+    if raw_gender:
+        g_clean = str(raw_gender).strip().capitalize()
+        if g_clean in ["Male", "Female", "Other"]:
+            cleaned["gender"] = g_clean
+            _log(f"PASS   gender={g_clean!r}", grounding_log)
+        else:
+            _log(f"REJECT gender={raw_gender!r} -- invalid gender value", grounding_log)
+            cleaned["gender"] = None
+            if "gender" not in rejected_fields:
+                rejected_fields.append("gender")
+
+    # ------------------------------------------------------------------
     # 6. Validate department (must be a known valid department string)
     # ------------------------------------------------------------------
     raw_dept = cleaned.get("department")

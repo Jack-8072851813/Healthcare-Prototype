@@ -227,8 +227,10 @@ def _call_gemini(prompt: str) -> Optional[str]:
         },
     }
 
-    # Try primary model, then fallback to gemini-3.6-flash
-    for attempt_model in [model_name, "gemini-3.6-flash"]:
+    # Try primary model, then fallback models
+    models_to_try = [model_name, "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+    seen = set()
+    for attempt_model in [m for m in models_to_try if m and not (m in seen or seen.add(m))]:
         attempt_url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{attempt_model}:generateContent?key={LLM_API_KEY}"
@@ -238,7 +240,7 @@ def _call_gemini(prompt: str) -> Optional[str]:
                 attempt_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=2.5,
+                timeout=2.0,
                 verify=verify_ssl,
             )
             if res.status_code == 404 and attempt_model != "gemini-1.5-flash-latest":
@@ -490,6 +492,9 @@ PATIENT'S MESSAGE:
 "{message_text}"
 
 INSTRUCTIONS:
+- NEW CLINICAL COMPLAINT PRIORITY: When the patient provides a disease, symptom, health complaint, or reason for consultation (including short phrases like "Nose pain", "Ear bleeding", "Throat pain", "Hair Fall problem", "I have Nose pain"), ALWAYS classify intent as BOOK_APPOINTMENT, extract medical_reason, reason_raw_quote, and determine the appropriate department (e.g. Dermatology for hair loss/scalp, ENT for ear/nose/throat, General Medicine for fever/cough), even if an active appointment workflow or previous question exists.
+- Do NOT force a new clinical complaint into a currently pending date, time, or doctor field.
+- Do NOT carry forward stale doctor or date values when a new clinical complaint is provided in THIS message.
 - Use the conversation state and history to resolve ambiguous short messages.
 - If pending_stage=AWAITING_DATE and patient says "tomorrow", extract appointment_date=tomorrow's date with date_raw_quote="tomorrow".
 - If pending_stage=AWAITING_BOOKING_ID, keep intent as APPOINTMENT_STATUS or CANCEL_APPOINTMENT and do not switch to BOOK_APPOINTMENT.
@@ -1185,27 +1190,19 @@ def get_recent_conversation_history(conversation_code: str, max_turns: int = 6) 
         cur = conn.cursor()
         try:
             cur.execute(
-                "SELECT id FROM conversations WHERE conversation_code = %s LIMIT 1;",
-                (conversation_code,)
-            )
-            row = cur.fetchone()
-            if not row:
-                return []
-            conv_id = row[0]
-
-            cur.execute(
                 """
-                SELECT sender_type, message_text
-                FROM messages
-                WHERE conversation_id = %s
-                  AND message_type = 'TEXT'
-                  AND sender_type IN ('PATIENT', 'AI_AGENT')
-                  AND message_text IS NOT NULL
-                  AND message_text != ''
-                ORDER BY id DESC
+                SELECT m.sender_type, m.message_text
+                FROM messages m
+                JOIN conversations c ON m.conversation_id = c.id
+                WHERE c.conversation_code = %s
+                  AND m.message_type = 'TEXT'
+                  AND m.sender_type IN ('PATIENT', 'AI_AGENT')
+                  AND m.message_text IS NOT NULL
+                  AND m.message_text != ''
+                ORDER BY m.id DESC
                 LIMIT %s;
                 """,
-                (conv_id, max_turns * 2),  # fetch extra to account for system messages
+                (conversation_code, max_turns * 2),  # fetch extra to account for system messages
             )
             rows = cur.fetchall()
 
