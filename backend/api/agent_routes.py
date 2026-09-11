@@ -29,6 +29,9 @@ class AgentChatResponse(BaseModel):
     response: str
     missing_information: List[str]
     tool_called: Optional[str] = None
+    interactive_buttons: Optional[List[dict]] = None
+    interactive_type: Optional[str] = None
+    list_button_title: Optional[str] = None
 
 @router.post("/chat", response_model=AgentChatResponse)
 def agent_chat_endpoint(payload: AgentChatRequest):
@@ -48,7 +51,10 @@ def agent_chat_endpoint(payload: AgentChatRequest):
             intent=res["intent"],
             response=res["response"],
             missing_information=res["missing_information"],
-            tool_called=res["tool_called"]
+            tool_called=res["tool_called"],
+            interactive_buttons=res.get("interactive_buttons"),
+            interactive_type=res.get("interactive_type"),
+            list_button_title=res.get("list_button_title")
         )
     except Exception as e:
         import traceback

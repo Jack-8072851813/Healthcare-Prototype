@@ -89,7 +89,8 @@ def run_migrations():
         tables_with_updated_at = [
             "roles", "users", "patients", "departments", "doctors", 
             "doctor_schedules", "appointments", "pre_admissions", 
-            "conversations", "knowledge_documents", "knowledge_chunks"
+            "conversations", "knowledge_documents", "knowledge_chunks",
+            "payments", "patient_reports"
         ]
         
         for table in tables_with_updated_at:

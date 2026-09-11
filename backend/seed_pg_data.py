@@ -296,6 +296,21 @@ def seed_data():
                 VALUES (%s, %s, %s, %s, %s, %s, %s);
             """, (c_id, p_id, act_name, intent, json.dumps(inp), json.dumps(out), stat))
             
+        # 16. Seed Patient Reports
+        print("Seeding Patient Reports...")
+        reports_data = [
+            ("REP10001", patient_ids.get("P001", 1), "Lab Test", "Blood Test (Complete Blood Count)", "2026-09-10", 1, 1, "Available", "Hb: 14.2 g/dL, WBC: 7,500/mcL, Platelets: 250,000/mcL. All parameters within normal ranges."),
+            ("REP10002", patient_ids.get("P001", 1), "Cardiology", "ECG Report", "2026-09-08", 2, 2, "Available", "Normal Sinus Rhythm. Heart rate 72 bpm. PR interval and QT duration within normal limits."),
+            ("REP10003", patient_ids.get("P001", 1), "Radiology", "CT Scan (Chest)", "2026-09-02", 3, 3, "Available", "Clear lung fields bilaterally. No focal opacity, pleural effusion, or pneumothorax identified."),
+            ("REP10004", patient_ids.get("P002", 2), "Lab Test", "Lipid Profile Test", "2026-09-11", 1, 1, "Available", "Total Cholesterol: 185 mg/dL, HDL: 48 mg/dL, LDL: 110 mg/dL, Triglycerides: 135 mg/dL.")
+        ]
+        for ref, p_id, r_type, r_title, r_date, doc_id, dept_id, stat, summary in reports_data:
+            cur.execute("""
+                INSERT INTO patient_reports (report_reference, patient_id, report_type, report_title, report_date, doctor_id, department_id, status, summary)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (report_reference) DO NOTHING;
+            """, (ref, p_id, r_type, r_title, r_date, doc_id, dept_id, stat, summary))
+
         # Commit transaction
         conn.commit()
         print("Database seeded successfully with all sample data!")

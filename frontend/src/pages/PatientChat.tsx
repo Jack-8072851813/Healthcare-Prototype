@@ -11,6 +11,9 @@ interface ChatMessage {
   isVoice?: boolean;
   voiceDuration?: string;
   audioUrl?: string; // base64 Data URI or URL
+  interactive_buttons?: { id: string; title: string; description?: string }[];
+  interactive_type?: string;
+  list_button_title?: string;
 }
 
 const VOICE_PROMPTS = [
@@ -36,6 +39,11 @@ const PatientChat: React.FC = () => {
   const [recordingStatus, setRecordingStatus] = useState<string | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   
+  // Interactive Slot List Modal State
+  const [slotModalOpen, setSlotModalOpen] = useState(false);
+  const [slotModalButtons, setSlotModalButtons] = useState<{ id: string; title: string; description?: string }[]>([]);
+  const [slotModalHeader, setSlotModalHeader] = useState('Available Time Slots');
+
   // Voice Simulator fallback state
   const [showVoiceModal, setShowVoiceModal] = useState(false);
   const [selectedPrompt, setSelectedPrompt] = useState(VOICE_PROMPTS[0]);
@@ -132,7 +140,10 @@ const PatientChat: React.FC = () => {
         id: 'msg_ai_' + Date.now(),
         sender: 'AI_AGENT',
         text: data.response,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        interactive_buttons: data.interactive_buttons,
+        interactive_type: data.interactive_type,
+        list_button_title: data.list_button_title
       };
 
       setMessages(prev => [...prev, aiMsg]);
@@ -463,7 +474,75 @@ const PatientChat: React.FC = () => {
                       <span style={{ fontSize: '11px', color: '#667781', fontWeight: 'normal' }}>({m.voiceDuration})</span>
                     </div>
                   ) : (
-                    <div>{m.text}</div>
+                    <div style={{ whiteSpace: 'pre-line' }}>{m.text.replace(/\*/g, '')}</div>
+                  )}
+
+                  {/* Interactive List Button (for time slots) */}
+                  {isAgent && m.interactive_buttons && m.interactive_buttons.length > 0 && (m.interactive_type === 'list' || m.interactive_buttons.some(b => b.id.startsWith('btn_slot_'))) && (
+                    <div style={{ marginTop: '10px' }}>
+                      <button
+                        onClick={() => {
+                          setSlotModalButtons(m.interactive_buttons || []);
+                          setSlotModalHeader(m.text.split('\n')[0].replace(/\*/g, '') || 'Available Time Slots');
+                          setSlotModalOpen(true);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          background: '#f0f2f5',
+                          color: '#075E54',
+                          border: '1.5px solid #128C7E',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseOver={(e) => e.currentTarget.style.background = '#e8f5e9'}
+                        onMouseOut={(e) => e.currentTarget.style.background = '#f0f2f5'}
+                      >
+                        <span>{m.list_button_title || 'Choose a time ▼'}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Standard Interactive Action Buttons (e.g. Confirm Appointment, Change Time, Cancel, etc.) */}
+                  {isAgent && m.interactive_buttons && m.interactive_buttons.length > 0 && m.interactive_type !== 'list' && !m.interactive_buttons.some(b => b.id.startsWith('btn_slot_')) && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
+                      {m.interactive_buttons.map((btn) => (
+                        <button
+                          key={btn.id}
+                          onClick={() => sendMessage(btn.title)}
+                          style={{
+                            width: '100%',
+                            padding: '9px 14px',
+                            background: '#ffffff',
+                            border: '1px solid #128C7E',
+                            borderRadius: '8px',
+                            color: '#075E54',
+                            fontWeight: 600,
+                            fontSize: '13.5px',
+                            cursor: 'pointer',
+                            textAlign: 'center',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                            transition: 'all 0.15s ease'
+                          }}
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.background = '#e8f5e9';
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.background = '#ffffff';
+                          }}
+                        >
+                          {btn.title}
+                        </button>
+                      ))}
+                    </div>
                   )}
 
                   {/* Play audio button for AI generated audio response */}
@@ -646,6 +725,119 @@ const PatientChat: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Interactive Time-Slot Selection List Modal */}
+      {slotModalOpen && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(17, 27, 33, 0.65)',
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          zIndex: 998
+        }}>
+          <div style={{
+            background: '#ffffff',
+            width: '100%',
+            maxWidth: '850px',
+            borderTopLeftRadius: '16px',
+            borderTopRightRadius: '16px',
+            boxShadow: '0 -4px 30px rgba(0,0,0,0.2)',
+            display: 'flex',
+            flexDirection: 'column',
+            maxHeight: '75%',
+            overflow: 'hidden'
+          }}>
+            {/* List Modal Header */}
+            <div style={{
+              background: '#075E54',
+              color: '#ffffff',
+              padding: '14px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderTopLeftRadius: '16px',
+              borderTopRightRadius: '16px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>📅</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '15px' }}>{slotModalHeader || 'Select Appointment Time'}</div>
+                  <div style={{ fontSize: '11.5px', opacity: 0.85 }}>Tap an available slot to book</div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSlotModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontSize: '22px',
+                  padding: '0 4px',
+                  lineHeight: 1
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Scrollable list of options */}
+            <div style={{
+              padding: '16px',
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              maxHeight: '380px',
+              background: '#f8f9fa'
+            }}>
+              {slotModalButtons.map((btn) => (
+                <div
+                  key={btn.id}
+                  onClick={() => {
+                    setSlotModalOpen(false);
+                    sendMessage(btn.title);
+                  }}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    fontSize: '14.5px',
+                    fontWeight: 600,
+                    color: '#111b21',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = '#e8f5e9';
+                    e.currentTarget.style.borderColor = '#128C7E';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = '#ffffff';
+                    e.currentTarget.style.borderColor = '#e0e0e0';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '16px', color: '#128C7E' }}>⏰</span>
+                    <span>{btn.title}</span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#128C7E', fontWeight: 700 }}>Select →</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Multilingual Voice Simulator Modal (Fallback) */}
       {showVoiceModal && (
