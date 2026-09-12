@@ -20,6 +20,8 @@ class AgentChatRequest(BaseModel):
     patient_id: Optional[str] = None  # Could be patient code (e.g. 'P001') or null
     message: str
     language: Optional[str] = "ENGLISH"
+    button_id: Optional[str] = None
+    interactive_id: Optional[str] = None
 
 class AgentChatResponse(BaseModel):
     success: bool
@@ -38,11 +40,13 @@ def agent_chat_endpoint(payload: AgentChatRequest):
     try:
         # If payload.patient_id is provided, check if it is a patient code or user ID
         # Pass payload.message and conversation_id to process_agent_message
+        btn = payload.button_id or payload.interactive_id
         res = agent_service.process_agent_message(
             conversation_code=payload.conversation_id,
             patient_code=payload.patient_id,
             message_text=payload.message,
-            language_override=payload.language
+            language_override=payload.language,
+            interactive_id=btn
         )
         return AgentChatResponse(
             success=res["success"],

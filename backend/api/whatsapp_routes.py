@@ -237,6 +237,111 @@ def _global_whatsapp_flush_callback(phone_num: str, merged_text: str, metadata: 
 _aggregator.set_flush_callback(_global_whatsapp_flush_callback)
 
 
+def process_voice_reply(session_id: str, from_number: str, msg_id: str, audio_data: dict):
+    media_id = audio_data.get("id")
+    print(f"[VOICE_MESSAGE_RECEIVED] wamid={msg_id}, media_id={media_id}, from={from_number}")
+    whatsapp_client.mark_message_read(msg_id)
+    whatsapp_client.send_typing_indicator(from_number)
+
+    if not media_id:
+        err_msg = "Sorry, I couldn't access your voice message. Please try again."
+        action_buttons = [
+            {"id": "btn_try_again_voice", "title": "Try Again"},
+            {"id": "btn_type_message", "title": "Type Message"}
+        ]
+        whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
+        record_whatsapp_message_id(session_id, msg_id)
+        return
+
+    # Download audio from Meta
+    temp_audio_path = whatsapp_client.download_media(media_id)
+    if not temp_audio_path or not os.path.exists(temp_audio_path) or os.path.getsize(temp_audio_path) == 0:
+        print(f"[VOICE_MEDIA_DOWNLOAD_FAILED] media_id={media_id}")
+        err_msg = "Sorry, I couldn't access your voice message. Please try again."
+        action_buttons = [
+            {"id": "btn_try_again_voice", "title": "Try Again"},
+            {"id": "btn_type_message", "title": "Type Message"}
+        ]
+        whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
+        record_whatsapp_message_id(session_id, msg_id)
+        return
+
+    try:
+        print(f"[VOICE_TRANSCRIPTION_STARTED] media_id={media_id}")
+        stt_provider = speech_to_text.get_stt_provider()
+        stt_res = stt_provider.transcribe(temp_audio_path)
+        
+        transcript = (stt_res.get("text") or "").strip() if stt_res.get("success") else ""
+        detected_lang = stt_res.get("language") or "ENGLISH"
+
+        invalid_transcripts = ["", "voice", "audio", "message", "none", "null"]
+        if not stt_res.get("success") or not transcript or transcript.lower() in invalid_transcripts:
+            print(f"[VOICE_TRANSCRIPTION_FAILED] media_id={media_id}, error={stt_res.get('error')}")
+            err_msg = "Sorry, I couldn't understand your voice message. Please try again."
+            action_buttons = [
+                {"id": "btn_try_again_voice", "title": "Try Again"},
+                {"id": "btn_type_message", "title": "Type Message"}
+            ]
+            whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
+            record_whatsapp_message_id(session_id, msg_id)
+            return
+
+        print(f"[VOICE_TRANSCRIPTION_COMPLETED] transcript='{transcript}', lang={detected_lang}")
+
+        # Log incoming VOICE message in DB
+        agent_service.log_message_to_db(
+            conversation_code=session_id,
+            sender_type="PATIENT",
+            message_text=transcript,
+            language=detected_lang,
+            intent="VOICE_MESSAGE",
+            metadata={
+                "whatsapp_message_id": msg_id,
+                "media_id": media_id,
+                "mime_type": audio_data.get("mime_type", "audio/ogg"),
+                "message_type": "VOICE"
+            },
+            message_type="VOICE"
+        )
+
+        # Process transcript through Agent Core
+        agent_res = agent_service.process_agent_message(
+            conversation_code=session_id,
+            patient_code=None,
+            message_text=transcript,
+            language_override=detected_lang
+        )
+        print(f"[AI_RESPONSE_GENERATED] intent={agent_res.get('intent')}, lang={agent_res.get('language')}")
+        
+        response_text = agent_res["response"]
+        final_lang = agent_res.get("language", detected_lang)
+        interactive_buttons = agent_res.get("interactive_buttons", [])
+
+        # Synthesize voice response
+        tts_provider = text_to_speech.get_tts_provider()
+        tts_res = tts_provider.synthesize(response_text, language=final_lang)
+
+        if interactive_buttons:
+            send_res = whatsapp_client.send_button_message(from_number, response_text, interactive_buttons)
+        else:
+            send_res = whatsapp_client.send_text_message(from_number, response_text)
+
+        outbound_wamid = send_res.get("message_id") if isinstance(send_res, dict) else None
+        if outbound_wamid:
+            record_outbound_wamid(session_id, outbound_wamid)
+
+        if tts_res.get("success") and tts_res.get("audio_data"):
+            whatsapp_client.send_audio_message(from_number, tts_res["audio_data"])
+
+        record_whatsapp_message_id(session_id, msg_id)
+    finally:
+        if os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except Exception:
+                pass
+
+
 @router.get("/webhook")
 def verify_webhook(
     hub_mode: str = Query(None, alias="hub.mode"),
@@ -419,15 +524,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
             result = _aggregator.add(from_number, text_body, metadata={"msg_id": msg_id, "session_id": session_id})
             if result is not None:
-                agent_res = process_and_send_reply(session_id, from_number, msg_id, result)
-                return {
-                    "status": "success",
-                    "message_id": msg_id,
-                    "session_id": session_id,
-                    "intent": agent_res.get("intent") if agent_res else None,
-                    "language": agent_res.get("language") if agent_res else None,
-                    "response": agent_res.get("response") if agent_res else None
-                }
+                background_tasks.add_task(process_and_send_reply, session_id, from_number, msg_id, result)
 
             return {
                 "status": "success",
@@ -438,118 +535,12 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         # 2. Voice/Audio Message flow
         elif msg_type == "audio":
             audio_data = message_data.get("audio", {})
-            media_id = audio_data.get("id")
-            
-            print(f"[VOICE_MESSAGE_RECEIVED] wamid={msg_id}, media_id={media_id}, from={from_number}")
-            whatsapp_client.mark_message_read(msg_id)
-            whatsapp_client.send_typing_indicator(from_number)
-
-            if not media_id:
-                err_msg = "Sorry, I couldn't access your voice message. Please try again."
-                action_buttons = [
-                    {"id": "btn_try_again_voice", "title": "Try Again"},
-                    {"id": "btn_type_message", "title": "Type Message"}
-                ]
-                whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
-                record_whatsapp_message_id(session_id, msg_id)
-                return {"status": "error", "detail": "Missing voice media id"}
-
-            # Download audio from Meta
-            temp_audio_path = whatsapp_client.download_media(media_id)
-            if not temp_audio_path or not os.path.exists(temp_audio_path) or os.path.getsize(temp_audio_path) == 0:
-                print(f"[VOICE_MEDIA_DOWNLOAD_FAILED] media_id={media_id}")
-                err_msg = "Sorry, I couldn't access your voice message. Please try again."
-                action_buttons = [
-                    {"id": "btn_try_again_voice", "title": "Try Again"},
-                    {"id": "btn_type_message", "title": "Type Message"}
-                ]
-                send_res = whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
-                record_whatsapp_message_id(session_id, msg_id)
-                return {"status": "error", "detail": "Media download failed"}
-
-            try:
-                print(f"[VOICE_TRANSCRIPTION_STARTED] media_id={media_id}")
-                stt_provider = speech_to_text.get_stt_provider()
-                stt_res = stt_provider.transcribe(temp_audio_path)
-                
-                transcript = (stt_res.get("text") or "").strip() if stt_res.get("success") else ""
-                detected_lang = stt_res.get("language") or "ENGLISH"
-
-                invalid_transcripts = ["", "voice", "audio", "message", "none", "null"]
-                if not stt_res.get("success") or not transcript or transcript.lower() in invalid_transcripts:
-                    print(f"[VOICE_TRANSCRIPTION_FAILED] media_id={media_id}, error={stt_res.get('error')}")
-                    err_msg = "Sorry, I couldn't understand your voice message. Please try again."
-                    action_buttons = [
-                        {"id": "btn_try_again_voice", "title": "Try Again"},
-                        {"id": "btn_type_message", "title": "Type Message"}
-                    ]
-                    send_res = whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
-                    record_whatsapp_message_id(session_id, msg_id)
-                    return {"status": "error", "detail": "STT transcription failed"}
-
-                print(f"[VOICE_TRANSCRIPTION_COMPLETED] transcript='{transcript}', lang={detected_lang}")
-
-                # Log incoming VOICE message in DB
-                agent_service.log_message_to_db(
-                    conversation_code=session_id,
-                    sender_type="PATIENT",
-                    message_text=transcript,
-                    language=detected_lang,
-                    intent="VOICE_MESSAGE",
-                    metadata={
-                        "whatsapp_message_id": msg_id,
-                        "media_id": media_id,
-                        "mime_type": audio_data.get("mime_type", "audio/ogg"),
-                        "message_type": "VOICE"
-                    },
-                    message_type="VOICE"
-                )
-
-                # Process transcript through Agent Core
-                agent_res = agent_service.process_agent_message(
-                    conversation_code=session_id,
-                    patient_code=None,
-                    message_text=transcript,
-                    language_override=detected_lang
-                )
-                print(f"[AI_RESPONSE_GENERATED] intent={agent_res.get('intent')}, lang={agent_res.get('language')}")
-                
-                response_text = agent_res["response"]
-                final_lang = agent_res.get("language", detected_lang)
-                interactive_buttons = agent_res.get("interactive_buttons", [])
-
-                # Synthesize voice response
-                tts_provider = text_to_speech.get_tts_provider()
-                tts_res = tts_provider.synthesize(response_text, language=final_lang)
-
-                if interactive_buttons:
-                    send_res = whatsapp_client.send_button_message(from_number, response_text, interactive_buttons)
-                else:
-                    send_res = whatsapp_client.send_text_message(from_number, response_text)
-
-                outbound_wamid = send_res.get("message_id") if isinstance(send_res, dict) else None
-                if outbound_wamid:
-                    record_outbound_wamid(session_id, outbound_wamid)
-
-                if tts_res.get("success") and tts_res.get("audio_data"):
-                    whatsapp_client.send_audio_message(from_number, tts_res["audio_data"])
-
-                record_whatsapp_message_id(session_id, msg_id)
-                return {
-                    "status": "success",
-                    "message_id": msg_id,
-                    "session_id": session_id,
-                    "transcript": transcript,
-                    "intent": agent_res["intent"],
-                    "language": agent_res["language"]
-                }
-                
-            finally:
-                if os.path.exists(temp_audio_path):
-                    try:
-                        os.remove(temp_audio_path)
-                    except Exception:
-                        pass
+            background_tasks.add_task(process_voice_reply, session_id, from_number, msg_id, audio_data)
+            return {
+                "status": "success",
+                "message_id": msg_id,
+                "session_id": session_id
+            }
 
         return {"status": "ok", "detail": f"Unsupported message type: {msg_type}"}
 

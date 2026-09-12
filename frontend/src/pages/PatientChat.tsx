@@ -27,6 +27,29 @@ const VOICE_PROMPTS = [
   { text: "Reschedule APT10001 to next Monday.", lang: "English", display: "🎙️ [EN] \"Reschedule APT10001 to next Monday.\"" },
 ];
 
+const formatMessageText = (text: string) => {
+  if (!text) return null;
+  const lines = text.split('\n');
+  return lines.map((line, lineIdx) => {
+    const parts = line.split(/(\*[^*]+\*)/g);
+    return (
+      <React.Fragment key={lineIdx}>
+        {lineIdx > 0 && <br />}
+        {parts.map((part, partIdx) => {
+          if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+            return (
+              <strong key={partIdx} style={{ color: '#075E54', fontWeight: 700 }}>
+                {part.slice(1, -1)}
+              </strong>
+            );
+          }
+          return part;
+        })}
+      </React.Fragment>
+    );
+  });
+};
+
 const PatientChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -87,22 +110,63 @@ const PatientChat: React.FC = () => {
     };
   }, [isRecording]);
 
-  const resetSession = () => {
+  const resetSession = async () => {
     const newId = 'CONV_' + Math.random().toString(36).substr(2, 9).toUpperCase();
     setConversationId(newId);
+    stopAudio();
+
+    try {
+      const response = await fetch(`${BASE_URL}/api/agent/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: newId,
+          patient_id: null,
+          message: 'Hi'
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMessages([
+          {
+            id: 'welcome',
+            sender: 'AI_AGENT',
+            text: data.response,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            interactive_buttons: data.interactive_buttons,
+            interactive_type: data.interactive_type,
+            list_button_title: data.list_button_title
+          }
+        ]);
+        return;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
     setMessages([
       {
         id: 'welcome',
         sender: 'AI_AGENT',
-        text: 'Hello! Welcome to Meridian Hospital. I am your AI Patient Desk Assistant. I can help you with appointments, doctor availability, appointment cancellation or rescheduling, hospital information, and pre-admission assistance. How can I help you today?',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        text: 'Meridian Hospital 👋\n\nWelcome to Meridian Hospital.\nHow can I help you today?',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        interactive_buttons: [
+          { id: 'btn_cat_appts', title: '📅 Appointments', description: 'Book, view, reschedule or cancel' },
+          { id: 'btn_cat_doctors', title: '👨‍⚕️ Doctors & Services', description: 'Find doctors, departments and services' },
+          { id: 'btn_cat_inquiries', title: '💬 Patient Help & Inquiries', description: 'Hospital administrative assistance' },
+          { id: 'btn_cat_health', title: '📋 My Health & Records', description: 'Reports, appointments, documents and pre-admission' },
+          { id: 'btn_cat_billing', title: '💳 Billing & Payments', description: 'Bills, payments and insurance' },
+          { id: 'btn_cat_voice_lang', title: '🎤 Voice & Language', description: 'Voice interaction and language selection' },
+          { id: 'btn_cat_staff', title: '🧑‍💼 Talk to Hospital Staff', description: 'Human support' },
+          { id: 'btn_cat_emergency', title: '🚨 Emergency', description: 'Immediate safety route' }
+        ]
       }
     ]);
-    stopAudio();
   };
 
   // Text message submit
-  const sendMessage = async (textToSend: string) => {
+  const sendMessage = async (textToSend: string, buttonId?: string) => {
     if (!textToSend.trim()) return;
 
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -126,7 +190,8 @@ const PatientChat: React.FC = () => {
         body: JSON.stringify({
           conversation_id: conversationId,
           patient_id: null,
-          message: textToSend
+          message: textToSend,
+          button_id: buttonId
         })
       });
 
@@ -474,7 +539,7 @@ const PatientChat: React.FC = () => {
                       <span style={{ fontSize: '11px', color: '#667781', fontWeight: 'normal' }}>({m.voiceDuration})</span>
                     </div>
                   ) : (
-                    <div style={{ whiteSpace: 'pre-line' }}>{m.text.replace(/\*/g, '')}</div>
+                    <div>{formatMessageText(m.text)}</div>
                   )}
 
                   {/* Interactive List Button (for time slots) */}
@@ -511,37 +576,74 @@ const PatientChat: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Standard Interactive Action Buttons (e.g. Confirm Appointment, Change Time, Cancel, etc.) */}
+                  {/* Standard Interactive Action Buttons & Category Cards */}
                   {isAgent && m.interactive_buttons && m.interactive_buttons.length > 0 && m.interactive_type !== 'list' && !m.interactive_buttons.some(b => b.id.startsWith('btn_slot_')) && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
-                      {m.interactive_buttons.map((btn) => (
-                        <button
-                          key={btn.id}
-                          onClick={() => sendMessage(btn.title)}
-                          style={{
-                            width: '100%',
-                            padding: '9px 14px',
-                            background: '#ffffff',
-                            border: '1px solid #128C7E',
-                            borderRadius: '8px',
-                            color: '#075E54',
-                            fontWeight: 600,
-                            fontSize: '13.5px',
-                            cursor: 'pointer',
-                            textAlign: 'center',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseOver={(e) => {
-                            e.currentTarget.style.background = '#e8f5e9';
-                          }}
-                          onMouseOut={(e) => {
-                            e.currentTarget.style.background = '#ffffff';
-                          }}
-                        >
-                          {btn.title}
-                        </button>
-                      ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                      {m.interactive_buttons.map((btn) => {
+                        const hasDesc = !!btn.description || btn.id.startsWith('btn_cat_');
+                        if (hasDesc) {
+                          return (
+                            <div
+                              key={btn.id}
+                              onClick={() => sendMessage(btn.title, btn.id)}
+                              style={{
+                                background: '#ffffff',
+                                border: '1.5px solid #128C7E',
+                                borderRadius: '10px',
+                                padding: '10px 14px',
+                                cursor: 'pointer',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                                transition: 'all 0.18s ease'
+                              }}
+                              onMouseOver={(e) => {
+                                e.currentTarget.style.background = '#e8f5e9';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.background = '#ffffff';
+                                e.currentTarget.style.transform = 'none';
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, fontSize: '14px', color: '#075E54' }}>
+                                {btn.title}
+                              </div>
+                              {btn.description && (
+                                <div style={{ fontSize: '12px', color: '#54656f', marginTop: '2px', lineHeight: 1.3 }}>
+                                  {btn.description}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            key={btn.id}
+                            onClick={() => sendMessage(btn.title, btn.id)}
+                            style={{
+                              width: '100%',
+                              padding: '9px 14px',
+                              background: '#ffffff',
+                              border: '1px solid #128C7E',
+                              borderRadius: '8px',
+                              color: '#075E54',
+                              fontWeight: 600,
+                              fontSize: '13.5px',
+                              cursor: 'pointer',
+                              textAlign: 'center',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseOver={(e) => {
+                              e.currentTarget.style.background = '#e8f5e9';
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.background = '#ffffff';
+                            }}
+                          >
+                            {btn.title}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -801,7 +903,7 @@ const PatientChat: React.FC = () => {
                   key={btn.id}
                   onClick={() => {
                     setSlotModalOpen(false);
-                    sendMessage(btn.title);
+                    sendMessage(btn.title, btn.id);
                   }}
                   style={{
                     background: '#ffffff',

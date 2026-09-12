@@ -942,26 +942,58 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
     if btn_id:
         print(f"[BUTTON_ROUTING] Handling structured button tap: {btn_id}")
-        if btn_id == "btn_cat_doctors":
-            resp = "How can I help you with Doctors & Services?"
+        if btn_id in ("btn_cat_appts", "btn_cat_appointments"):
+            resp = "📅 *Appointments*\n\nHow can I help you with your appointments?"
             if current_lang == "TAMIL":
-                resp = "மருத்துவர்கள் மற்றும் சேவைகள் குறித்து நான் உங்களுக்கு எவ்வாறு உதவ வேண்டும்?"
+                resp = "📅 *அப்பாயிண்ட்மெண்ட்கள்*\n\nஉங்கள் அப்பாயிண்ட்மெண்ட்கள் குறித்து நான் எவ்வாறு உதவ வேண்டும்?"
             elif current_lang == "HINDI":
-                resp = "मैं डॉक्टरों और सेवाओं के संबंध में आपकी क्या मदद कर सकता हूं?"
+                resp = "📅 *अपॉइंटमेंट*\n\nमैं आपकी अपॉइंटमेंट में कैसे मदद कर सकता हूं?"
             elif current_lang == "TELUGU":
-                resp = "వైద్యులు మరియు సేవల విషయమై మీకు ఎలా సహాయపడాలి?"
+                resp = "📅 *అపాయింట్‌మెంట్‌లు*\n\nమీ అపాయింట్‌మెంట్‌ల విషయంలో ఎలా సహాయపడాలి?"
             elif current_lang == "MALAYALAM":
-                resp = "ഡോക്ടർമാരെയും സേവനങ്ങളെയും കുറിച്ച് ഞാൻ എങ്ങനെ സഹായിക്കണം?"
+                resp = "📅 *അപ്പോയിന്റ്മെന്റുകൾ*\n\nഅപ്പോയിന്റ്മെന്റുകളിൽ എങ്ങനെ സഹായിക്കണം?"
             elif current_lang == "KANNADA":
-                resp = "ವೈದ್ಯರು ಮತ್ತು ಸೇವೆಗಳ ಕುರಿತು ನಾನು ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?"
+                resp = "📅 *ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್*\n\nನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್‌ನಲ್ಲಿ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?"
             elif current_lang == "URDU":
-                resp = "ڈاکٹرز اور خدمات کے بارے میں میں آپ کی کیا مدد کر سکتا ہوں؟"
+                resp = "📅 *اپائنٹمنٹس*\n\nمیں آپ کی اپائنٹمنٹ میں کیسے مدد کر سکتا ہوں؟"
+
+            state["interactive_buttons"] = [
+                language_service.get_translated_button("btn_book_appt", current_lang),
+                language_service.get_translated_button("btn_my_appts", current_lang),
+                language_service.get_translated_button("btn_reschedule_appt", current_lang),
+                language_service.get_translated_button("btn_cancel_appt", current_lang),
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "APPOINTMENT_MENU"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "APPOINTMENT_MENU", state)
+            return {
+                "response": resp,
+                "intent": "APPOINTMENT_MENU",
+                "language": current_lang,
+                "interactive_buttons": state["interactive_buttons"]
+            }
+
+        elif btn_id == "btn_cat_doctors":
+            resp = "👨‍⚕️ *Doctors & Services*\n\nWhat would you like to explore?"
+            if current_lang == "TAMIL":
+                resp = "👨‍⚕️ *மருத்துவர்கள் & சேவைகள்*\n\nஎதைத் தேட விரும்புகிறீர்கள்?"
+            elif current_lang == "HINDI":
+                resp = "👨‍⚕️ *डॉक्टर और सेवाएं*\n\nआप क्या खोजना चाहते हैं?"
+            elif current_lang == "TELUGU":
+                resp = "👨‍⚕️ *వైద్యులు & సేవలు*\n\nమీరు దేనిని వెతకాలనుకుంటున్నారు?"
+            elif current_lang == "MALAYALAM":
+                resp = "👨‍⚕️ *ഡോക്ടറും സേവനവും*\n\nഎന്താണ് അറിയേണ്ടത്?"
+            elif current_lang == "KANNADA":
+                resp = "👨‍⚕️ *ವೈದ್ಯರು & ಸೇವೆಗಳು*\n\nನೀವು ಏನನ್ನು ಹುಡುಕಲು ಬಯಸುತ್ತೀರಿ?"
+            elif current_lang == "URDU":
+                resp = "👨‍⚕️ *ڈاکٹرز اور خدمات*\n\nآپ کیا تلاش کرنا چاہتے ہیں؟"
 
             state["interactive_buttons"] = [
                 language_service.get_translated_button("btn_find_doctor", current_lang),
                 language_service.get_translated_button("btn_departments", current_lang),
-                language_service.get_translated_button("btn_book_appt", current_lang),
-                language_service.get_translated_button("btn_doctor_avail", current_lang)
+                {"id": "btn_other_services", "title": "Hospital Services"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
             ]
             state["intent"] = "DOCTORS_AND_SERVICES"
             state_manager.save_conversation_state(conversation_code, state)
@@ -973,25 +1005,38 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 "interactive_buttons": state["interactive_buttons"]
             }
 
+        elif btn_id in ("btn_cat_inquiries", "btn_patient_help"):
+            resp = "💬 *Patient Help & Inquiries*\n\nWelcome to Meridian Hospital Administrative Help & Inquiries. How can we assist you today?"
+            state["interactive_buttons"] = [
+                language_service.get_translated_button("btn_hosp_info", current_lang),
+                {"id": "btn_visiting_hours", "title": "Visiting Hours"},
+                {"id": "btn_preadmission_info", "title": "Pre-Admission Info"},
+                language_service.get_translated_button("btn_cat_staff", current_lang),
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "HOSPITAL_INFORMATION"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "HOSPITAL_INFORMATION", state)
+            return {
+                "response": resp,
+                "intent": "HOSPITAL_INFORMATION",
+                "language": current_lang,
+                "interactive_buttons": state["interactive_buttons"]
+            }
+
         elif btn_id == "btn_cat_health":
-            resp = "How can I help you with your health records?"
+            resp = "📋 *My Health & Records*\n\nWhat would you like to access?"
             if current_lang == "TAMIL":
-                resp = "உங்கள் சுகாதார பதிவுகள் குறித்து எவ்வாறு உதவ வேண்டும்?"
+                resp = "📋 *என் சுகாதாரம் & பதிவுகள்*\n\nஎதைப் பார்க்க விரும்புகிறீர்கள்?"
             elif current_lang == "HINDI":
-                resp = "आपके स्वास्थ्य रिकॉर्ड के संबंध में मैं क्या मदद कर सकता हूं?"
-            elif current_lang == "TELUGU":
-                resp = "మీ ఆరోగ్య రికార్డుల విషయమై ఎలా సహాయపడాలి?"
-            elif current_lang == "MALAYALAM":
-                resp = "നിങ്ങളുടെ ആരോഗ്യ വിവരങ്ങളെക്കുറിച്ച് എങ്ങനെ സഹായിക്കണം?"
-            elif current_lang == "KANNADA":
-                resp = "ನಿಮ್ಮ ಆರೋಗ್ಯ ದಾಖಲೆಗಳ ಕುರಿತು ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?"
-            elif current_lang == "URDU":
-                resp = "آپ کے ہیلتھ ریکارڈز کے بارے میں میں کیسے مدد کر سکتا ہوں؟"
+                resp = "📋 *स्वास्थ्य व रिकॉर्ड*\n\nआप क्या देखना चाहते हैं?"
 
             state["interactive_buttons"] = [
-                language_service.get_translated_button("btn_my_profile", current_lang),
+                language_service.get_translated_button("btn_my_reports", current_lang),
                 language_service.get_translated_button("btn_my_appts", current_lang),
-                language_service.get_translated_button("btn_my_reports", current_lang)
+                {"id": "btn_my_documents", "title": "Documents"},
+                {"id": "btn_preadmission", "title": "Pre-Admission"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
             ]
             state["intent"] = "MY_HEALTH_AND_RECORDS"
             state_manager.save_conversation_state(conversation_code, state)
@@ -1003,24 +1048,54 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 "interactive_buttons": state["interactive_buttons"]
             }
 
-        elif btn_id == "btn_cat_staff":
-            resp = "Would you like to talk to a hospital staff member?"
-            if current_lang == "TAMIL":
-                resp = "மருத்துவமனை பணியாளரிடம் பேச விரும்புகிறீர்களா?"
-            elif current_lang == "HINDI":
-                resp = "क्या आप अस्पताल के कर्मचारी से बात करना चाहते हैं?"
-            elif current_lang == "TELUGU":
-                resp = "మీరు ఆసుపత్రి సిబ్బందితో మాట్లాడాలనుకుంటున్నారా?"
-            elif current_lang == "MALAYALAM":
-                resp = "ആശുപത്രി ജീവനക്കാരുമായി സംസാരിക്കാൻ താല്പര്യമുണ്ടോ?"
-            elif current_lang == "KANNADA":
-                resp = "ನೀವು ಆಸ್ಪತ್ರೆಯ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಮಾತನಾಡಲು ಬಯಸುತ್ತೀರಾ?"
-            elif current_lang == "URDU":
-                resp = "کیا آپ ہسپتال کے عملے سے بات کرنا چاہتے ہیں؟"
-
+        elif btn_id == "btn_cat_billing":
+            resp = (
+                "💳 *Billing & Payments*\n\n"
+                "Outstanding Balance: ₹4,850\n"
+                "Account Status: Active\n\n"
+                "Select an option below to view or manage billing:"
+            )
             state["interactive_buttons"] = [
-                language_service.get_translated_button("btn_talk_staff_exec", current_lang),
-                language_service.get_translated_button("btn_continue_ai", current_lang)
+                {"id": "btn_view_bill", "title": "View Bill"},
+                {"id": "btn_payment_history", "title": "Payment History"},
+                {"id": "btn_insurance", "title": "Insurance"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "BILLING_AND_PAYMENTS"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BILLING_AND_PAYMENTS", state)
+            return {
+                "response": resp,
+                "intent": "BILLING_AND_PAYMENTS",
+                "language": current_lang,
+                "interactive_buttons": state["interactive_buttons"]
+            }
+
+        elif btn_id == "btn_cat_voice_lang":
+            resp = "🎤 *Voice & Language*\n\nSelect an option below to talk to AI or change your preferred language:"
+            state["interactive_buttons"] = [
+                {"id": "btn_talk_ai", "title": "🎤 Talk to AI"},
+                {"id": "btn_change_language", "title": "🌐 Change Language"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "VOICE_AND_LANGUAGE"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "VOICE_AND_LANGUAGE", state)
+            return {
+                "response": resp,
+                "intent": "VOICE_AND_LANGUAGE",
+                "language": current_lang,
+                "interactive_buttons": state["interactive_buttons"]
+            }
+
+        elif btn_id == "btn_cat_staff":
+            resp = "🧑‍💼 *Hospital Staff Support*\n\nHow can our hospital support team help you today?"
+            state["interactive_buttons"] = [
+                {"id": "btn_staff_appt", "title": "Appointment Support"},
+                {"id": "btn_staff_billing", "title": "Billing Support"},
+                {"id": "btn_staff_reg", "title": "Registration Support"},
+                {"id": "btn_staff_general", "title": "General Support"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
             ]
             state["intent"] = "TALK_TO_STAFF_PROMPT"
             state_manager.save_conversation_state(conversation_code, state)
@@ -1034,7 +1109,8 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
         elif btn_id in ("btn_cat_emergency", "btn_emergency"):
             resp = (
-                "🚨 *24/7 Emergency & Trauma Care*\n\n"
+                "🚨 *Emergency Assistance*\n\n"
+                "If this is an emergency, please seek immediate medical care.\n\n"
                 "🚨 *Emergency Helpline:* 044 6666 9999\n"
                 "📞 *General Enquiries:* 044 6666 9910\n"
                 "📍 *Address:* #46D, Jawaharlal Nehru Road, 200 Feet Ring Road, Chennai – 600 099\n\n"
@@ -1054,6 +1130,173 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 "language": current_lang,
                 "interactive_buttons": state["interactive_buttons"]
             }
+
+        elif btn_id in ("btn_staff_appt", "btn_staff_billing", "btn_staff_reg", "btn_staff_general"):
+            resp = language_service.get_talk_to_staff_contact_response(current_lang)
+            state["interactive_buttons"] = [
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "HUMAN_ESCALATION"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "HUMAN_ESCALATION", state)
+            return {
+                "response": resp,
+                "intent": "HUMAN_ESCALATION",
+                "language": current_lang,
+                "interactive_buttons": state["interactive_buttons"]
+            }
+
+        elif btn_id == "btn_view_bill":
+            resp = (
+                "💳 *Itemized Hospital Bill*\n\n"
+                "Patient: Gil Christ (P9989)\n"
+                "Bill Reference: INV-2026-8841\n"
+                "Bill Date: 10-Sep-2026\n\n"
+                "• OPD Consultation Fee: ₹800\n"
+                "• Diagnostic Lab Tests: ₹2,450\n"
+                "• Pharmacy Charges: ₹1,600\n"
+                "----------------------------------------\n"
+                "Total Amount Due: ₹4,850\n\n"
+                "Select a payment method below to clear outstanding balance:"
+            )
+            state["interactive_buttons"] = [
+                {"id": "btn_pay_gpay", "title": "Google Pay"},
+                {"id": "btn_pay_upi", "title": "UPI / PhonePe"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "BILLING_AND_PAYMENTS"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BILLING_AND_PAYMENTS", state)
+            return {"response": resp, "intent": "BILLING_AND_PAYMENTS", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_payment_history":
+            resp = (
+                "📜 *Payment & Billing History*\n\n"
+                "1. TXN9981 — ₹800 (OPD Consultation - Dermatology) — Paid on 02-Sep-2026\n"
+                "2. TXN9102 — ₹1,200 (Lab Test - CBC & Lipid) — Paid on 15-Aug-2026\n\n"
+                "All receipts have been issued to your registered account."
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "BILLING_AND_PAYMENTS"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "BILLING_AND_PAYMENTS", state)
+            return {"response": resp, "intent": "BILLING_AND_PAYMENTS", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_insurance":
+            resp = (
+                "🛡️ *Insurance & Cashless Desk*\n\n"
+                "Meridian Hospital partners with major TPA and Health Insurance Providers (Star Health, ICICI Lombard, HDFC ERGO, Max Bupa, Care Health).\n\n"
+                "📞 *Insurance Desk Helpline:* 044 6666 9910\n"
+                "📍 *Location:* Ground Floor, Main Block Counter 4\n"
+                "📧 *TPA Email:* insurance@meridian-hospital.com"
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_cat_staff", current_lang), language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "HOSPITAL_INFORMATION"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "HOSPITAL_INFORMATION", state)
+            return {"response": resp, "intent": "HOSPITAL_INFORMATION", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_my_documents":
+            resp = (
+                "📑 *My Documents*\n\n"
+                "1. Discharge Summary (2026-06-10)\n"
+                "2. Doctor Prescription (2026-09-02)\n"
+                "3. Vaccination Certificate\n\n"
+                "All documents are securely archived in your digital health folder."
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_my_reports", current_lang), language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "MY_HEALTH_AND_RECORDS"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "MY_HEALTH_AND_RECORDS", state)
+            return {"response": resp, "intent": "MY_HEALTH_AND_RECORDS", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_preadmission":
+            resp = (
+                "📋 *Pre-Admission Status*\n\n"
+                "Status: No active pre-admission form required.\n\n"
+                "If you are scheduled for elective surgery or inpatient admission, please bring your ID proof, doctor referral note, and insurance card."
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "MY_HEALTH_AND_RECORDS"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "MY_HEALTH_AND_RECORDS", state)
+            return {"response": resp, "intent": "MY_HEALTH_AND_RECORDS", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_visiting_hours":
+            resp = (
+                "🕒 *Visiting Hours & Guidelines*\n\n"
+                "• OPD Consultations: 08:00 AM - 08:00 PM (Mon - Sat)\n"
+                "• In-Patient Ward: 04:00 PM - 07:00 PM Daily\n"
+                "• ICU Visiting Hours: 05:00 PM - 06:00 PM (1 Visitor at a time)\n"
+                "• 24/7 Emergency & Casualty Service"
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_cat_staff", current_lang), language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "HOSPITAL_INFORMATION"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "HOSPITAL_INFORMATION", state)
+            return {"response": resp, "intent": "HOSPITAL_INFORMATION", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_other_services":
+            resp = (
+                "🩺 *Meridian Hospital Services*\n\n"
+                "• 24/7 Multi-Specialty OPD & Inpatient Care\n"
+                "• Advanced Diagnostic Lab & 3T MRI Radiology\n"
+                "• Emergency, Ambulance & Level-1 Trauma Care\n"
+                "• 24/7 Pharmacy & Blood Bank Facilities"
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_book_appt", current_lang), language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "DOCTORS_AND_SERVICES"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "DOCTORS_AND_SERVICES", state)
+            return {"response": resp, "intent": "DOCTORS_AND_SERVICES", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_talk_ai":
+            resp = (
+                "🎤 *Talk to AI Assistant*\n\n"
+                "You can tap the microphone button on your input bar at any time to record a voice message in English, Tamil, Hindi, Telugu, Malayalam, Kannada, or Urdu.\n\n"
+                "Our AI Assistant will listen, translate, and respond naturally."
+            )
+            state["interactive_buttons"] = [language_service.get_translated_button("btn_main_menu", current_lang)]
+            state["intent"] = "VOICE_AND_LANGUAGE"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "VOICE_AND_LANGUAGE", state)
+            return {"response": resp, "intent": "VOICE_AND_LANGUAGE", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id == "btn_change_language":
+            resp = "🌐 *Select Your Language / மொழியைத் தேர்ந்தெடுக்கவும்*\n\nPlease select your preferred language:"
+            state["interactive_buttons"] = [
+                {"id": "btn_lang_en", "title": "English"},
+                {"id": "btn_lang_ta", "title": "தமிழ் (Tamil)"},
+                {"id": "btn_lang_hi", "title": "हिंदी (Hindi)"},
+                {"id": "btn_lang_te", "title": "తెలుగు (Telugu)"},
+                {"id": "btn_lang_ml", "title": "മലയാളം (Malayalam)"},
+                {"id": "btn_lang_kn", "title": "ಕನ್ನಡ (Kannada)"},
+                {"id": "btn_lang_ur", "title": "اردو (Urdu)"},
+                language_service.get_translated_button("btn_main_menu", current_lang)
+            ]
+            state["intent"] = "VOICE_AND_LANGUAGE"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "VOICE_AND_LANGUAGE", state)
+            return {"response": resp, "intent": "VOICE_AND_LANGUAGE", "language": current_lang, "interactive_buttons": state["interactive_buttons"]}
+
+        elif btn_id and btn_id.startswith("btn_lang_"):
+            lang_code_map = {
+                "btn_lang_en": "ENGLISH",
+                "btn_lang_ta": "TAMIL",
+                "btn_lang_hi": "HINDI",
+                "btn_lang_te": "TELUGU",
+                "btn_lang_ml": "MALAYALAM",
+                "btn_lang_kn": "KANNADA",
+                "btn_lang_ur": "URDU"
+            }
+            new_lang = lang_code_map.get(btn_id, "ENGLISH")
+            state["language"] = new_lang
+            resp = language_service.translate_response("LANGUAGE_CHANGED", language=new_lang)
+            state["interactive_buttons"] = language_service.get_main_menu_buttons(new_lang)
+            state["intent"] = "GREETING"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, new_lang, "GREETING", state)
+            return {"response": resp, "intent": "GREETING", "language": new_lang, "interactive_buttons": state["interactive_buttons"]}
 
         elif btn_id in ("btn_find_doctor", "btn_doctor_avail"):
             conn = db_config.get_db_connection()
@@ -5438,12 +5681,12 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
             # Time parsing (Rule extractor + LLM)
             user_explicitly_mentioned_time = bool(
-                entity_extractor.parse_natural_time(message_text.lower())
-                or re.search(r"\b(1[0-2]|0?[1-9])(?::[0-5]\d)?\s*(?:am|pm)\b", message_text.lower())
+                re.search(r"\b(1[0-2]|0?[1-9])(?::[0-5]\d)?\s*(?:am|pm)\b", message_text.lower())
                 or re.search(r"\b([01]?\d|2[0-3]):[0-5]\d\b", message_text)
-                or re.search(r"\b(morning|afternoon|evening|night)\b", message_text.lower())
+                or re.search(r"\b(morning|afternoon|evening|night|noon|midnight)\b", message_text.lower())
+                or re.search(r"\bat\s+(1[0-2]|0?[1-9])\b", message_text.lower())
             )
-            parsed_time = entity_extractor.parse_natural_time(message_text.lower())
+            parsed_time = entity_extractor.parse_natural_time(message_text.lower()) if user_explicitly_mentioned_time else None
             if parsed_time:
                 state["entities"]["appointment_time"] = parsed_time
             elif user_explicitly_mentioned_time and llm_info.get("appointment_time"):
