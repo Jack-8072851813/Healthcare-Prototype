@@ -143,12 +143,11 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                 {
                     "number": 1,
                     "content": (
-                        "Meridian Hospital is a multispecialty hospital operated by Walfs India Private Limited. "
-                        "It provides comprehensive outpatient (OPD) and inpatient care across multiple medical specialties. "
+                        "Meridian Hospital is a 300-bed multi-super-specialty hospital in Chennai operated by Walfs India Private Limited. "
+                        "It provides comprehensive outpatient (OPD), inpatient care, and 24/7 Emergency & Trauma Care across multiple medical specialties. "
                         "The hospital is committed to delivering compassionate, technology-enabled healthcare services. "
                         "Meridian Hospital's AI Patient Desk helps patients with appointment scheduling, doctor availability, "
-                        "hospital information, and pre-admission assistance through WhatsApp and voice interfaces.\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "hospital information, and pre-admission assistance through WhatsApp and voice interfaces."
                     ),
                     "meta": {"category": "HOSPITAL_OVERVIEW", "language": "ENGLISH"}
                 }
@@ -167,8 +166,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         f"Meridian Hospital provides specialized medical care across the following departments:\n\n"
                         f"{dept_list}\n\n"
                         f"Patients can ask the AI Patient Desk to help identify the right department based on their "
-                        f"symptoms or medical needs, and to book an OPD appointment directly.\n\n"
-                        f"[POC SAMPLE INFORMATION — departments read from live database]"
+                        f"symptoms or medical needs, and to book an OPD appointment directly."
                     ),
                     "meta": {"category": "DEPARTMENTS", "departments": [d["name"] for d in departments]}
                 }
@@ -187,8 +185,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         f"Meridian Hospital has the following active doctors available for OPD consultations:\n\n"
                         f"{doctor_list}\n\n"
                         f"To book an appointment with any of these doctors, simply tell the AI Patient Desk "
-                        f"which doctor or department you need and your preferred date.\n\n"
-                        f"[POC SAMPLE INFORMATION — doctors read from live database]"
+                        f"which doctor or department you need and your preferred date."
                     ),
                     "meta": {"category": "DOCTORS", "doctor_count": len(doctors)}
                 }
@@ -207,8 +204,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         f"Meridian Hospital OPD (Outpatient Department) consultation schedules:\n\n"
                         f"{schedule_list}\n\n"
                         f"Appointment slots are available every 30 minutes during scheduled hours. "
-                        f"The AI Patient Desk shows live availability and can book a slot instantly.\n\n"
-                        f"[POC SAMPLE INFORMATION — schedules read from live database]"
+                        f"The AI Patient Desk shows live availability and can book a slot instantly."
                     ),
                     "meta": {"category": "OPD_TIMINGS"}
                 },
@@ -220,8 +216,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "• Bring a valid ID (Aadhaar card, PAN card, or passport).\n"
                         "• Emergency services are available 24 hours a day, 7 days a week.\n"
                         "• OPD consultations operate on a prior appointment basis.\n"
-                        "• Walk-in patients may be accommodated subject to availability.\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• Walk-in patients may be accommodated subject to availability."
                     ),
                     "meta": {"category": "OPD_TIMINGS", "type": "guidelines"}
                 }
@@ -248,8 +243,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "• Cancelled slots are immediately made available to other patients\n\n"
                         "Rescheduling Policy:\n"
                         "• Appointments can be rescheduled to any available slot\n"
-                        "• Provide your appointment ID and your preferred new date and time\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• Provide your appointment ID and your preferred new date and time"
                     ),
                     "meta": {"category": "APPOINTMENT_INFORMATION"}
                 }
@@ -275,8 +269,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "• Ambulance Service — Emergency ambulance dispatch\n"
                         "• Patient Waiting Lounge — Air-conditioned waiting area with seating\n"
                         "• Wheelchair Access — Facilities are accessible to differently-abled patients\n"
-                        "• Cafeteria — Light refreshments available for patients and visitors\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• Cafeteria — Light refreshments available for patients and visitors"
                     ),
                     "meta": {"category": "HOSPITAL_FACILITIES"}
                 }
@@ -293,14 +286,12 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                     "number": 1,
                     "content": (
                         "Meridian Hospital Contact Information:\n\n"
-                        "• General Enquiries: +91 99999 99999\n"
-                        "• Emergency Helpline: +91 99999 00000 (24/7)\n"
-                        "• Appointment Desk: +91 99999 11111\n"
-                        "• Email: care@meridianhospital.in\n"
-                        "• Website: www.meridianhospital.in (POC placeholder)\n"
-                        "• WhatsApp AI Patient Desk: Available 24/7 for appointment booking "
-                        "and hospital information\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• General Enquiries: 044 6666 9910\n"
+                        "• Emergency Helpline: 044 6666 9999 (24/7)\n"
+                        "• Email: info@meridian-hospital.com\n"
+                        "• Official Website: https://meridianhospitals.in/\n"
+                        "• Address: #46D, Jawaharlal Nehru Road, 200 Feet Ring Road, Chennai – 600 099\n"
+                        "• WhatsApp AI Patient Desk: Available 24/7 for appointment booking and hospital information"
                     ),
                     "meta": {"category": "CONTACT_INFORMATION"}
                 }
@@ -317,14 +308,13 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                     "number": 1,
                     "content": (
                         "Meridian Hospital Location:\n\n"
-                        "Address: 123 Healthcare Lane, Sector 4, Walfs India — 500001\n"
-                        "Operated by: Walfs India Private Limited\n\n"
+                        "Address: #46D, Jawaharlal Nehru Road, 200 Feet Ring Road, Chennai – 600 099\n"
+                        "Facility: 300-bed multi-super-specialty hospital\n\n"
                         "How to reach Meridian Hospital:\n"
-                        "• By Road: Accessible via Healthcare Lane off the main Sector 4 highway\n"
-                        "• By Public Transport: Bus stops and auto-rickshaw stands are within 200 metres\n"
-                        "• Parking: Free patient parking is available on the hospital premises\n"
-                        "• Google Maps: Search for 'Meridian Hospital Walfs India' for directions\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• By Road: Located on Jawaharlal Nehru Road (200 Feet Ring Road), Chennai\n"
+                        "• By Public Transport: Easily accessible by bus and auto-rickshaw\n"
+                        "• Parking: Patient and visitor parking available on hospital premises\n"
+                        "• Emergency & Trauma Care: 24/7 emergency entrance clearly marked"
                     ),
                     "meta": {"category": "LOCATION"}
                 }
@@ -340,18 +330,17 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                 {
                     "number": 1,
                     "content": (
-                        "Emergency services at Meridian Hospital are available 24 hours a day, "
-                        "7 days a week, 365 days a year.\n\n"
-                        "Emergency contact: +91 99999 00000\n\n"
+                        "🚨 MERIDIAN HOSPITAL EMERGENCY & TRAUMA CARE\n\n"
+                        "Emergency services at Meridian Hospital are available 24 hours a day, 7 days a week, 365 days a year.\n\n"
+                        "📞 Emergency Helpline: 044 6666 9999\n\n"
                         "For life-threatening emergencies such as chest pain, severe breathing difficulty, "
-                        "stroke, major trauma, or loss of consciousness — please call emergency services "
-                        "(112 or 108) immediately or proceed to the nearest emergency department without delay.\n\n"
+                        "stroke, major trauma, or loss of consciousness — call 044 6666 9999 or 112/108 immediately "
+                        "or proceed to the Meridian Hospital Emergency Department without delay.\n\n"
                         "The Meridian Hospital Emergency Department provides:\n"
                         "• 24/7 emergency triage and stabilization\n"
                         "• Emergency surgery support\n"
-                        "• Critical care monitoring\n"
-                        "• Ambulance dispatch coordination\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• Critical care monitoring and ICU support\n"
+                        "• 24/7 ambulance dispatch coordination"
                     ),
                     "meta": {"category": "EMERGENCY_INFORMATION"}
                 }
@@ -376,8 +365,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "3. Complete pre-operative tests (blood work, ECG, imaging as required)\n"
                         "4. Meet with the care team to discuss your treatment plan\n"
                         "5. Complete consent and documentation forms\n"
-                        "6. Receive admission instructions including fasting requirements\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "6. Receive admission instructions including fasting requirements"
                     ),
                     "meta": {"category": "PRE_ADMISSION"}
                 }
@@ -404,8 +392,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "• Previous diagnostic reports and prescriptions\n"
                         "• Health insurance card and pre-authorization (for insurance patients)\n"
                         "• Emergency contact details (name, relationship, phone number)\n"
-                        "• Advance payment or insurance pre-authorization as required\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• Advance payment or insurance pre-authorization as required"
                     ),
                     "meta": {"category": "ADMISSION_DOCUMENTS"}
                 }
@@ -432,8 +419,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "• Arrive 10–15 minutes before your scheduled appointment time\n"
                         "• Wear comfortable clothing\n"
                         "• Inform the desk about any known allergies or medical conditions\n"
-                        "• Carry sufficient cash or a payment card for consultation fees\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "• Carry sufficient cash or a payment card for consultation fees"
                     ),
                     "meta": {"category": "PATIENT_INSTRUCTIONS"}
                 }
@@ -462,8 +448,7 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "and your preferred new date and time.\n\n"
                         "Q: How do I know if my appointment is confirmed?\n"
                         "A: You will receive a booking confirmation message with your appointment ID "
-                        "immediately after booking.\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "immediately after booking."
                     ),
                     "meta": {"category": "FAQ"}
                 },
@@ -480,9 +465,8 @@ def build_knowledge_documents(departments, doctors, schedules) -> list[dict]:
                         "A: OPD schedules vary by doctor. The AI Patient Desk can check real-time "
                         "availability for any doctor on any date.\n\n"
                         "Q: What should I do in a medical emergency?\n"
-                        "A: For life-threatening emergencies, call 112 or 108 immediately, or proceed "
-                        "directly to the Emergency Department. Do not wait for an appointment.\n\n"
-                        "[POC SAMPLE INFORMATION]"
+                        "A: For life-threatening emergencies, call 044 6666 9999 / 112 / 108 immediately, or proceed "
+                        "directly to the Emergency Department. Do not wait for an appointment."
                     ),
                     "meta": {"category": "FAQ"}
                 }

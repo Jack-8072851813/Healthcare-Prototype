@@ -200,14 +200,14 @@ def detect_language_shift(text: str) -> str:
     return None
 
 
-def detect_language(text: str) -> str:
+def detect_language(text: str, current_lang: str = None) -> str:
     """Detects the primary language of the user input string."""
     if not text:
-        return "ENGLISH"
+        return current_lang or "ENGLISH"
     shift = detect_language_shift(text)
     if shift:
         return shift
-        
+
     # Check script characters
     if re.search(r"[\u0B80-\u0BFF]", text):
         return "TAMIL"
@@ -222,7 +222,183 @@ def detect_language(text: str) -> str:
     if re.search(r"[\u0600-\u06FF]", text):
         return "URDU"
 
+    # Short context-dependent messages, digits, times, or button clicks should NOT override established language
+    t_clean = text.strip().lower()
+    if current_lang and current_lang in {"TAMIL", "HINDI", "TELUGU", "MALAYALAM", "KANNADA", "URDU"}:
+        if t_clean.startswith("btn_") or len(t_clean) <= 4 or re.match(r"^\d{1,2}(:\d{2})?\s*(am|pm)?$", t_clean) or t_clean in {
+            "yes", "no", "ok", "okay", "confirm", "cancel", "tomorrow", "today",
+            "same doctor", "change it", "10 am", "11 am", "10:00", "11:00", "11:30", "11:30 am", "10:30", "10:30 am", "12:00", "09:00", "09:30",
+            "confirm appointment", "book appointment"
+        }:
+            return current_lang
+
     return "ENGLISH"
+
+
+# Contextual Button Menu Translations for all 7 supported languages
+# Note: Every button title MUST be <= 20 characters to comply with Meta WhatsApp Cloud API limits.
+
+MENU_BUTTON_TRANSLATIONS = {
+    "ENGLISH": {
+        "btn_cat_doctors": "Doctors & Services",
+        "btn_cat_health": "My Health & Records",
+        "btn_cat_staff": "Talk to Staff",
+        "btn_cat_emergency": "Emergency",
+        "btn_find_doctor": "Find a Doctor",
+        "btn_departments": "Departments",
+        "btn_book_appt": "Book Appointment",
+        "btn_doctor_avail": "Doctor Availability",
+        "btn_my_profile": "My Profile",
+        "btn_my_appts": "My Appointments",
+        "btn_cancel_appt": "Cancel Appointment",
+        "btn_reschedule_appt": "Reschedule Appt",
+        "btn_hosp_info": "Hospital Information",
+        "btn_my_reports": "My Reports",
+        "btn_talk_staff_exec": "Talk to Staff",
+        "btn_continue_ai": "Continue with AI",
+        "btn_main_menu": "Main Menu"
+    },
+    "TAMIL": {
+        "btn_cat_doctors": "மருத்துவர் & சேவை",
+        "btn_cat_health": "உடல்நலம் & பதிவு",
+        "btn_cat_staff": "பணியாளருடன் பேச",
+        "btn_cat_emergency": "அவசரநிலை",
+        "btn_find_doctor": "மருத்துவரைத் தேடு",
+        "btn_departments": "துறைகள்",
+        "btn_book_appt": "முன்பதிவு செய்ய",
+        "btn_doctor_avail": "மருத்துவர் இருப்பு",
+        "btn_my_profile": "எனது சுயவிவரம்",
+        "btn_my_appts": "என் அப்பாயிண்ட்மெண்ட்",
+        "btn_cancel_appt": "ரத்து செய்ய",
+        "btn_reschedule_appt": "மாற்றி அமைக்க",
+        "btn_hosp_info": "மருத்துவமனை தகவல்",
+        "btn_my_reports": "எனது அறிக்கைகள்",
+        "btn_talk_staff_exec": "பணியாளருடன் பேச",
+        "btn_continue_ai": "AI-யுடன் தொடர",
+        "btn_main_menu": "முதன்மை மெனு"
+    },
+    "HINDI": {
+        "btn_cat_doctors": "डॉक्टर और सेवाएं",
+        "btn_cat_health": "स्वास्थ्य व रिकॉर्ड",
+        "btn_cat_staff": "स्टाफ से बात करें",
+        "btn_cat_emergency": "आपातकालीन",
+        "btn_find_doctor": "डॉक्टर खोजें",
+        "btn_departments": "विभाग",
+        "btn_book_appt": "अपॉइंटमेंट बुक करें",
+        "btn_doctor_avail": "डॉक्टर उपलब्धता",
+        "btn_my_profile": "मेरी प्रोफ़ाइल",
+        "btn_my_appts": "मेरे अपॉइंटमेंट",
+        "btn_cancel_appt": "रद्द करें",
+        "btn_reschedule_appt": "पुनर्निर्धारित करें",
+        "btn_hosp_info": "अस्पताल जानकारी",
+        "btn_my_reports": "मेरी रिपोर्ट",
+        "btn_talk_staff_exec": "स्टाफ से बात करें",
+        "btn_continue_ai": "AI जारी रखें",
+        "btn_main_menu": "मुख्य मेनू"
+    },
+    "TELUGU": {
+        "btn_cat_doctors": "వైద్యులు & సేవలు",
+        "btn_cat_health": "ఆరోగ్యం & రికార్డులు",
+        "btn_cat_staff": "సిబ్బందితో మాట్లాడండి",
+        "btn_cat_emergency": "అత్యవసరం",
+        "btn_find_doctor": "డాక్టర్‌ను వెతకండి",
+        "btn_departments": "విభాగాలు",
+        "btn_book_appt": "అపాయింట్‌మెంట్ బుక్",
+        "btn_doctor_avail": "డాక్టర్ లభ్యత",
+        "btn_my_profile": "నా ప్రొఫైల్",
+        "btn_my_appts": "నా అపాయింట్‌మెంట్‌లు",
+        "btn_cancel_appt": "రద్దు చేయండి",
+        "btn_reschedule_appt": "రీషెడ్యూల్",
+        "btn_hosp_info": "ఆసుపత్రి సమాచారం",
+        "btn_my_reports": "నా నివేదికలు",
+        "btn_talk_staff_exec": "సిబ్బందితో మాట్లాడండి",
+        "btn_continue_ai": "AI తో కొనసాగించు",
+        "btn_main_menu": "ముఖ్య మెనూ"
+    },
+    "MALAYALAM": {
+        "btn_cat_doctors": "ഡോക്ടറും സേവനവും",
+        "btn_cat_health": "ആരോഗ്യ വിവരങ്ങൾ",
+        "btn_cat_staff": "സ്റ്റാഫുമായി സംസാരിക്കൂ",
+        "btn_cat_emergency": "അടിയന്തിരം",
+        "btn_find_doctor": "ഡോക്ടറെ കണ്ടെത്തുക",
+        "btn_departments": "വിഭാഗങ്ങൾ",
+        "btn_book_appt": "അപ്പോയിന്റ്മെന്റ്",
+        "btn_doctor_avail": "ഡോക്ടറുടെ ലഭ്യത",
+        "btn_my_profile": "എന്റെ പ്രൊഫൈൽ",
+        "btn_my_appts": "എന്റെ അപ്പോയിന്റ്മെന്റ്",
+        "btn_cancel_appt": "റദ്ദാക്കുക",
+        "btn_reschedule_appt": "റീഷെഡ്യൂൾ",
+        "btn_hosp_info": "ആശുപത്രി വിവരങ്ങൾ",
+        "btn_my_reports": "എന്റെ റിപ്പോർട്ടുകൾ",
+        "btn_talk_staff_exec": "സ്റ്റാഫുമായി സംസാരിക്കൂ",
+        "btn_continue_ai": "AI തുടരുക",
+        "btn_main_menu": "പ്രധാന മെനു"
+    },
+    "KANNADA": {
+        "btn_cat_doctors": "ವೈದ್ಯರು & ಸೇವೆಗಳು",
+        "btn_cat_health": "ಆರೋಗ್ಯ & ದಾಖಲೆಗಳು",
+        "btn_cat_staff": "ಸಿಬ್ಬಂದಿ ಜೊತೆ ಮಾತನಾಡಿ",
+        "btn_cat_emergency": "ತುರ್ತು ಸೇವೆ",
+        "btn_find_doctor": "ವೈದ್ಯರನ್ನು ಹುಡುಕಿ",
+        "btn_departments": "ವಿಭಾಗಗಳು",
+        "btn_book_appt": "ಬುಕಿಂಗ್ ಮಾಡಿ",
+        "btn_doctor_avail": "ವೈದ್ಯರ ಲಭ್ಯತೆ",
+        "btn_my_profile": "ನನ್ನ ಪ್ರೊಫೈಲ್",
+        "btn_my_appts": "ನನ್ನ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್",
+        "btn_cancel_appt": "ರದ್ದುಗೊಳಿಸಿ",
+        "btn_reschedule_appt": "ಮರು-ನಿಗದಿಗೊಳಿಸಿ",
+        "btn_hosp_info": "ಆಸ್ಪತ್ರೆಯ ಮಾಹಿತಿ",
+        "btn_my_reports": "ನನ್ನ ವರದಿಗಳು",
+        "btn_talk_staff_exec": "ಸಿಬ್ಬಂದಿ ಜೊತೆ ಮಾತನಾಡಿ",
+        "btn_continue_ai": "AI ಯೊಂದಿಗೆ ಮುಂದುವರಿಯಿರಿ",
+        "btn_main_menu": "ಮುಖ್ಯ ಮೆನು"
+    },
+    "URDU": {
+        "btn_cat_doctors": "ڈاکٹرز اور خدمات",
+        "btn_cat_health": "صحت اور ریکارڈ",
+        "btn_cat_staff": "اسٹاف سے بات کریں",
+        "btn_cat_emergency": "ہنگامی علاج",
+        "btn_find_doctor": "ڈاکٹر تلاش کریں",
+        "btn_departments": "شعبہ جات",
+        "btn_book_appt": "اپائنٹمنٹ بک کریں",
+        "btn_doctor_avail": "ڈاکٹر کی دستیابی",
+        "btn_my_profile": "میرا پروفائل",
+        "btn_my_appts": "میری اپائنٹمنٹس",
+        "btn_cancel_appt": "منسوخ کریں",
+        "btn_reschedule_appt": "ری شیڈول کریں",
+        "btn_hosp_info": "ہسپتال معلومات",
+        "btn_my_reports": "میری رپورٹس",
+        "btn_talk_staff_exec": "اسٹاف سے بات کریں",
+        "btn_continue_ai": "AI کے ساتھ جاری رکھیں",
+        "btn_main_menu": "مین مینو"
+    }
+}
+
+
+def get_translated_button(btn_id: str, language: str = "ENGLISH") -> dict:
+    """Returns a button dict {"id": btn_id, "title": title} translated to the requested language (max 20 chars)."""
+    lang = language.upper() if language else "ENGLISH"
+    if lang not in MENU_BUTTON_TRANSLATIONS:
+        lang = "ENGLISH"
+    title = MENU_BUTTON_TRANSLATIONS[lang].get(btn_id, MENU_BUTTON_TRANSLATIONS["ENGLISH"].get(btn_id, btn_id))
+    return {"id": btn_id, "title": str(title)[:20]}
+
+
+def get_main_menu_buttons(language: str = "ENGLISH") -> list:
+    """Returns all 10 main menu options in patient's language."""
+    return [
+        get_translated_button("btn_cat_doctors", language),
+        get_translated_button("btn_cat_health", language),
+        get_translated_button("btn_book_appt", language),
+        get_translated_button("btn_doctor_avail", language),
+        get_translated_button("btn_my_appts", language),
+        get_translated_button("btn_cancel_appt", language),
+        get_translated_button("btn_reschedule_appt", language),
+        get_translated_button("btn_hosp_info", language),
+        get_translated_button("btn_cat_staff", language),
+        get_translated_button("btn_cat_emergency", language)
+    ]
+
 
 
 def translate_response(key: str, language: str = "ENGLISH", **kwargs) -> str:
@@ -317,3 +493,98 @@ TRANSLATIONS["URDU"]["ASK_DOB"] = "شکریہ۔ کیا مجھے آپ کی تار
 TRANSLATIONS["URDU"]["ASK_GENDER"] = "آپ کی جنس کیا ہے؟ (مرد/عورت/دیگر)"
 TRANSLATIONS["URDU"]["ASK_PHONE"] = "براہ کرم اپنا فون نمبر فراہم کریں۔"
 TRANSLATIONS["URDU"]["REGISTRATION_COMPLETE"] = "آپ کی رجسٹریشن مکمل ہو گئی ہے۔ آپ کا مریض کوڈ {patient_code} ہے۔ آج میں آپ کی کیا مدد کر سکتا ہوں؟"
+
+TALK_TO_STAFF_CONTACTS = {
+    "ENGLISH": (
+        "Certainly. Our hospital team can assist you.\n\n"
+        "Hospital Staff Contacts:\n\n"
+        "📞 General Enquiries:\n044 6666 9910\n\n"
+        "📞 Appointment / Hospital Enquiries:\n044 6666 9910\n\n"
+        "📞 Insurance Desk:\n044 6666 9910\n\n"
+        "🚨 Emergency:\n044 6666 9999\n\n"
+        "📧 Email:\ninfo@meridian-hospital.com\n\n"
+        "📍 Address:\n#46D, Jawaharlal Nehru Road,\n200 Feet Ring Road,\nChennai – 600 099\n\n"
+        "Our team can help with appointments, hospital information, insurance-related queries and other patient support.\n\n"
+        "I am connecting you with a hospital staff member. An agent will be with you shortly."
+    ),
+    "TAMIL": (
+        "நிச்சயமாக. எங்கள் மருத்துவமனை குழு உங்களுக்கு உதவ முடியும்.\n\n"
+        "மருத்துவமனை தொடர்பு விவரங்கள்:\n\n"
+        "📞 பொது விசாரணைகள்:\n044 6666 9910\n\n"
+        "📞 அப்பாயிண்ட்மெண்ட் / மருத்துவமனை விசாரணைகள்:\n044 6666 9910\n\n"
+        "📞 காப்பீட்டு பிரிவு (Insurance Desk):\n044 6666 9910\n\n"
+        "🚨 அவசர சிகிச்சை:\n044 6666 9999\n\n"
+        "📧 மின்னஞ்சல்:\ninfo@meridian-hospital.com\n\n"
+        "📍 முகவரி:\n#46D, ஜவஹர்லால் நேரு சாலை,\n200 அடி ரிங் ரோடு,\nசென்னை – 600 099\n\n"
+        "அப்பாயிண்ட்மெண்ட்கள், மருத்துவமனை தகவல்கள், காப்பீடு தொடர்பான கேள்விகள் மற்றும் பிற நோயாளி ஆதரவிற்கு எங்கள் குழு உதவ முடியும்.\n\n"
+        "மருத்துவமனை உதவி குழுவுடன் உங்களை இணைக்கிறேன். ஒரு முகவர் விரைவில் உங்களுடன் பேசுவார்."
+    ),
+    "HINDI": (
+        "निश्चित रूप से। हमारी अस्पताल टीम आपकी सहायता कर सकती है।\n\n"
+        "अस्पताल संपर्क विवरण:\n\n"
+        "📞 सामान्य पूछताछ:\n044 6666 9910\n\n"
+        "📞 अपॉइंटमेंट / अस्पताल पूछताछ:\n044 6666 9910\n\n"
+        "📞 इंश्योरेंस डेस्क:\n044 6666 9910\n\n"
+        "🚨 आपातकालीन:\n044 6666 9999\n\n"
+        "📧 ईमेल:\ninfo@meridian-hospital.com\n\n"
+        "📍 पता:\n#46D, जवाहरलाल नेहरू रोड,\n200 फीट रिंग रोड,\nचेन्नई – 600 099\n\n"
+        "हमारी टीम अपॉइंटमेंट, अस्पताल की जानकारी, बीमा संबंधी पूछताछ और अन्य सहायता में मदद कर सकती है।\n\n"
+        "मैं आपको अस्पताल के कर्मचारी से जोड़ रहा हूं। एक एजेंट जल्द ही आपके साथ होगा।"
+    ),
+    "TELUGU": (
+        "ఖచ్చితంగా. మా హాస్పిటల్ బృందం మీకు సహాయం చేయగలదు.\n\n"
+        "హాస్పిటల్ సంప్రదింపు వివరాలు:\n\n"
+        "📞 సాధారణ విచారణలు:\n044 6666 9910\n\n"
+        "📞 అపాయింట్‌మెంట్ / హాస్పిటల్ విచారణలు:\n044 6666 9910\n\n"
+        "📞 ఇన్సూరెన్స్ డెస్క్:\n044 6666 9910\n\n"
+        "🚨 అత్యవసర సేవలు:\n044 6666 9999\n\n"
+        "📧 ఈమెయిల్:\ninfo@meridian-hospital.com\n\n"
+        "📍 చిరునామా:\n#46D, జవహర్‌లాల్ నెహ్రూ రోడ్,\n200 ఫీట్ రింగ్ రోడ్,\nచెన్నై – 600 099\n\n"
+        "అపాయింట్‌మెంట్‌లు, హాస్పిటల్ సమాచారం, ఇన్సూరెన్స్ వివరాలు మరియు ఇతర సహాయం కొరకు మా బృందం సహాయం చేస్తుంది.\n\n"
+        "నేను మిమ్మల్ని హాస్పిటల్ సిబ్బందితో కనెక్ట్ చేస్తున్నాను. ప్రతినిధి త్వరలోనే అందుబాటులోకి వస్తారు."
+    ),
+    "MALAYALAM": (
+        "തീർച്ചയായും. ഞങ്ങളുടെ ആശുപത്രി ടീമിന് നിങ്ങളെ സഹായിക്കാനാകും.\n\n"
+        "ആശുപത്രി ബന്ധപ്പെടേണ്ട വിവരങ്ങൾ:\n\n"
+        "📞 പൊതു അന്വേഷണങ്ങൾ:\n044 6666 9910\n\n"
+        "📞 അപ്പോയിന്റ്മെന്റ് / ആശുപത്രി അന്വേഷണങ്ങൾ:\n044 6666 9910\n\n"
+        "📞 ഇൻഷുറൻസ് ഡെസ്ക്:\n044 6666 9910\n\n"
+        "🚨 അടിയന്തര സേവനം:\n044 6666 9999\n\n"
+        "📧 ഇമെയിൽ:\ninfo@meridian-hospital.com\n\n"
+        "📍 മേൽവിലാസം:\n#46D, ജവഹർലാൽ നെഹ്റു റോഡ്,\n200 ഫീറ്റ് റിംഗ് റോഡ്,\nചെന്നൈ – 600 099\n\n"
+        "അപ്പോയിന്റ്മെന്റുകൾ, ആശുപത്രി വിവരങ്ങൾ, ഇൻഷുറൻസ് സംശയങ്ങൾ എന്നിവയ്ക്ക് ഞങ്ങളുടെ ടീം സഹായിക്കും.\n\n"
+        "ഞാൻ നിങ്ങളെ ആശുപത്രി ജീവനക്കാരുമായി ബന്ധപ്പെടുത്തുന്നു. ഒരു ഏജന്റ് ഉടൻ നിങ്ങളുമായി സംസാരിക്കും."
+    ),
+    "KANNADA": (
+        "ಖಂಡಿತವಾಗಿ. ನಮ್ಮ ಆಸ್ಪತ್ರೆಯ ತಂಡವು ನಿಮಗೆ ಸಹಾಯ ಮಾಡುತ್ತದೆ.\n\n"
+        "ಆಸ್ಪತ್ರೆ ಸಂಪರ್ಕ ವಿವರಗಳು:\n\n"
+        "📞 ಸಾಮಾನ್ಯ ವಿಚಾರಣೆಗಳು:\n044 6666 9910\n\n"
+        "📞 ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ / ಆಸ್ಪತ್ರೆ ವಿಚಾರಣೆಗಳು:\n044 6666 9910\n\n"
+        "📞 ಇನ್ಶೂರೆನ್ಸ್ ಡೆಸ್ಕ್:\n044 6666 9910\n\n"
+        "🚨 ತುರ್ತು ಸೇವೆ:\n044 6666 9999\n\n"
+        "📧 ಇಮೇಲ್:\ninfo@meridian-hospital.com\n\n"
+        "📍 ವಿಳಾಸ:\n#46D, ಜವಾಹರ್‌ಲಾಲ್ ನೆಹರೂ ರಸ್ತೆ,\n200 ಫೀಟ್ ರಿಂಗ್ ರೋಡ್,\nಚೆನ್ನೈ – 600 099\n\n"
+        "ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್‌ಗಳು, ಆಸ್ಪತ್ರೆ ಮಾಹಿತಿ, ಇನ್ಶೂರೆನ್ಸ್ ವಿಚಾರಣೆಗಳು ಮತ್ತು ಇತರ ನೆರವಿಗಾಗಿ ನಮ್ಮ ತಂಡ ಸಹಾಯ ಮಾಡುತ್ತದೆ.\n\n"
+        "ನಾನು ನಿಮ್ಮನ್ನು ಆಸ್ಪತ್ರೆಯ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ. ಏಜೆಂಟ್ ಶೀಘ್ರದಲ್ಲೇ ನಿಮ್ಮನ್ನು ಸಂಪರ್ಕಿಸುತ್ತಾರೆ."
+    ),
+    "URDU": (
+        "بالکل۔ ہماری ہسپتال کی ٹیم آپ کی مدد کر سکتی ہے۔\n\n"
+        "ہسپتال کے رابطے کی تفصیلات:\n\n"
+        "📞 عام پوچھ گچھ:\n044 6666 9910\n\n"
+        "📞 اپائنٹمنٹ / ہسپتال انکوائری:\n044 6666 9910\n\n"
+        "📞 انشورنس ڈیسک:\n044 6666 9910\n\n"
+        "🚨 ہنگامی امداد:\n044 6666 9999\n\n"
+        "📧 ای میل:\ninfo@meridian-hospital.com\n\n"
+        "📍 پتہ:\n#46D, جواہر لعل نہرو روڈ,\n200 فٹ رنگ روڈ,\nچنئی – 600 099\n\n"
+        "ہماری ٹیم اپائنٹمنٹ، ہسپتال کی معلومات، انشورنس کی معلومات اور دیگر مدد میں تعاون کر سکتی ہے۔\n\n"
+        "میں آپ کو ہسپتال کے عملے سے جوڑ رہا ہوں۔ ایک ایجنٹ جلد ہی آپ کے ساتھ ہوگا۔"
+    )
+}
+
+def get_talk_to_staff_contact_response(language: str = "ENGLISH") -> str:
+    """Returns the verified hospital staff contact details + human escalation handoff message in the patient's language."""
+    lang = (language or "ENGLISH").upper()
+    if lang not in TALK_TO_STAFF_CONTACTS:
+        lang = "ENGLISH"
+    return TALK_TO_STAFF_CONTACTS[lang]
+

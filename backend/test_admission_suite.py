@@ -144,6 +144,14 @@ def test_05_department_mismatch_validation():
             )
         assert "does not belong to selected department" in str(exc.value)
     finally:
+        # Clean up dummy department to prevent test data from appearing in patient-facing flows
+        try:
+            cur2 = conn.cursor()
+            cur2.execute("DELETE FROM departments WHERE department_name LIKE 'DummyDept%' AND department_code LIKE 'D_%';")
+            conn.commit()
+            cur2.close()
+        except Exception:
+            pass
         cur.close()
         conn.close()
 

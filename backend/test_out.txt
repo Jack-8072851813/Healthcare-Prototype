@@ -1,0 +1,318 @@
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 15.706s
+
+OK
+[PERF] DB connection pool initialized (min=2, max=10)
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "Hi"
+[LLM_ROUTER] Prior intent         : GREETING
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : None
+[LLM_ROUTER] Missing info         : []
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] Gemini API error: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=2.0)
+[LLM_ROUTER] LLM raw response     : 
+[LLM_ROUTER] LLM returned no response — falling back to rule-based engine
+[LLM_ROUTER] Using rule-based fallback router
+[ROUTER] Input: "Hi" | Intent: GREETING | Medical Reason: Hi | Department: None | Confidence: 0.98
+[LLM_ROUTER] Selected intent      : GREETING
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Confidence           : 0.98
+[LLM_ROUTER] LLM-powered          : False
+[LLM_ROUTER] Downstream agent     : GREETING_HANDLER
+[LLM_ROUTER] === END ROUTING (fallback) ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "Hi"
+[GROUNDING] Pending stage: 
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE] GREETING with no entities -- clearing booking context
+
+[OK] TEST 1 PASSED: Greeting 'Hi' displays exactly 4 main categories with zero auto-booking.
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "I want to reschedule my appointment"
+[LLM_ROUTER] Prior intent         : GREETING
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : None
+[LLM_ROUTER] Missing info         : []
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] Gemini API error: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=2.0)
+[LLM_ROUTER] LLM raw response     : 
+[LLM_ROUTER] LLM returned no response — falling back to rule-based engine
+[LLM_ROUTER] Using rule-based fallback router
+[ROUTER] Input: "I want to reschedule my appointment" | Intent: RESCHEDULE_APPOINTMENT | Medical Reason: I want to reschedule my appointment | Department: None | Confidence: 0.98
+[LLM_ROUTER] Selected intent      : RESCHEDULE_APPOINTMENT
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Confidence           : 0.98
+[LLM_ROUTER] LLM-powered          : False
+[LLM_ROUTER] Downstream agent     : RESCHEDULE_APPOINTMENT_HANDLER
+[LLM_ROUTER] === END ROUTING (fallback) ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "I want to reschedule my appointment"
+[GROUNDING] Pending stage: 
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE]   WRITE  entities[symptoms] = []
+[STATE_MERGE]   WRITE  state[appointment_for] = 'SELF'
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "day after tomorrow"
+[LLM_ROUTER] Prior intent         : RESCHEDULE_APPOINTMENT
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : SELF
+[LLM_ROUTER] Missing info         : ['booking_id']
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] LLM raw response     : {
+  "intent": "RESCHEDULE_APPOINTMENT",
+  "confidence": 0.99,
+  "appointment_subject": "SELF",
+  "patient_reference": null,
+  "time_filter": null,
+  "symptoms": [],
+  "medical_reason": null,
+  "reason_raw_quote": null,
+  "department": null,
+  "doctor_name": null,
+  "doctor_raw_quote": null,
+  "patient_type": null,
+  "booking_for": "SELF",
+  "relationship": null,
+  "patient_name": null,
+  "patient_
+[INTENT_AGENT] Intent: RESCHEDULE_APPOINTMENT (Confidence: 0.99)
+[EXTRACTED_ENTITIES] Symptoms: [] | Reason: None | Doctor: None | Date: 2026-09-13 | Time: None | Booking For: SELF
+[LLM_ROUTER] Selected intent      : RESCHEDULE_APPOINTMENT
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Symptoms             : []
+[LLM_ROUTER] Booking for          : SELF
+[LLM_ROUTER] Relationship         : None
+[LLM_ROUTER] Appointment date     : 2026-09-13
+[LLM_ROUTER] Appointment time     : None
+[LLM_ROUTER] DOB                  : None (ambiguous=False)
+[LLM_ROUTER] Confidence           : 0.99
+[LLM_ROUTER] Needs clarification  : False
+[LLM_ROUTER] Emergency            : False
+[LLM_ROUTER] Downstream agent     : RESCHEDULE_APPOINTMENT_HANDLER
+[LLM_ROUTER] LLM-powered          : True
+[LLM_ROUTER] === END ROUTING ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "day after tomorrow"
+[GROUNDING] Pending stage: 
+[GROUNDING] PASS   appointment_date='2026-09-13'
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE]   WRITE  entities[symptoms] = []
+[STATE_MERGE]   WRITE  state[appointment_for] = 'SELF'
+[STATE_MERGE]   WRITE  entities[appointment_date] = '2026-09-13'
+
+[OK] TEST 2 & 3 PASSED: Reschedule workflow retains active context and shows isolated buttons.
+[BUTTON_ROUTING] Handling structured button tap: btn_my_appts
+[BUTTON_ROUTING] Handling structured button tap: btn_my_reports
+
+[OK] TEST 4, 5, 6 PASSED: Clickable appointment and report lists functioning.
+[BUTTON_ROUTING] Handling structured button tap: btn_cat_emergency
+
+[OK] TEST 7 PASSED: Emergency flow presents verified Meridian 044 6666 9999 data.
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "வணக்கம்"
+[LLM_ROUTER] Prior intent         : GREETING
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : None
+[LLM_ROUTER] Missing info         : []
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] LLM raw response     : {
+  "intent": "GREETING",
+  "confidence": 1.0,
+  "appointment_subject": null,
+  "patient_reference": null,
+  "time_filter": null,
+  "symptoms": [],
+  "medical_reason": null,
+  "reason_raw_quote": null,
+  "department": null,
+  "doctor_name": null,
+  "doctor_raw_quote": null,
+  "patient_type": null,
+  "booking_for": null,
+  "relationship": null,
+  "patient_name": null,
+  "patient_name_raw_quote": nu
+[INTENT_AGENT] Intent: GREETING (Confidence: 1.0)
+[EXTRACTED_ENTITIES] Symptoms: [] | Reason: None | Doctor: None | Date: None | Time: None | Booking For: SELF
+[LLM_ROUTER] Selected intent      : GREETING
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Symptoms             : []
+[LLM_ROUTER] Booking for          : SELF
+[LLM_ROUTER] Relationship         : None
+[LLM_ROUTER] Appointment date     : None
+[LLM_ROUTER] Appointment time     : None
+[LLM_ROUTER] DOB                  : None (ambiguous=False)
+[LLM_ROUTER] Confidence           : 1.0
+[LLM_ROUTER] Needs clarification  : False
+[LLM_ROUTER] Emergency            : False
+[LLM_ROUTER] Downstream agent     : GREETING_HANDLER
+[LLM_ROUTER] LLM-powered          : True
+[LLM_ROUTER] === END ROUTING ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "வணக்கம்"
+[GROUNDING] Pending stage: 
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE] GREETING with no entities -- clearing booking context
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "नमस्ते"
+[LLM_ROUTER] Prior intent         : GREETING
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : None
+[LLM_ROUTER] Missing info         : []
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] LLM raw response     : {
+  "intent": "GREETING",
+  "confidence": 0.99,
+  "appointment_subject": null,
+  "patient_reference": null,
+  "time_filter": null,
+  "symptoms": [],
+  "medical_reason": null,
+  "reason_raw_quote": null,
+  "department": null,
+  "doctor_name": null,
+  "doctor_raw_quote": null,
+  "patient_type": null,
+  "booking_for": null,
+  "relationship": null,
+  "patient_name": null,
+  "patient_name_raw_quote": n
+[INTENT_AGENT] Intent: GREETING (Confidence: 0.99)
+[EXTRACTED_ENTITIES] Symptoms: [] | Reason: None | Doctor: None | Date: None | Time: None | Booking For: SELF
+[LLM_ROUTER] Selected intent      : GREETING
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Symptoms             : []
+[LLM_ROUTER] Booking for          : SELF
+[LLM_ROUTER] Relationship         : None
+[LLM_ROUTER] Appointment date     : None
+[LLM_ROUTER] Appointment time     : None
+[LLM_ROUTER] DOB                  : None (ambiguous=False)
+[LLM_ROUTER] Confidence           : 0.99
+[LLM_ROUTER] Needs clarification  : False
+[LLM_ROUTER] Emergency            : False
+[LLM_ROUTER] Downstream agent     : GREETING_HANDLER
+[LLM_ROUTER] LLM-powered          : True
+[LLM_ROUTER] === END ROUTING ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "नमस्ते"
+[GROUNDING] Pending stage: 
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE] GREETING with no entities -- clearing booking context
+
+[OK] TEST 8 & 9 PASSED: Multilingual Tamil and Hindi greetings generate translated buttons <= 20 chars.
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "வணக்கம்"
+[LLM_ROUTER] Prior intent         : GREETING
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : None
+[LLM_ROUTER] Missing info         : []
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] LLM raw response     : {
+  "intent": "GREETING",
+  "confidence": 1.0,
+  "appointment_subject": null,
+  "patient_reference": null,
+  "time_filter": null,
+  "symptoms": [],
+  "medical_reason": null,
+  "reason_raw_quote": null,
+  "department": null,
+  "doctor_name": null,
+  "doctor_raw_quote": null,
+  "patient_type": null,
+  "booking_for": null,
+  "relationship": null,
+  "patient_name": null,
+  "patient_name_raw_quote": nu
+[INTENT_AGENT] Intent: GREETING (Confidence: 1.0)
+[EXTRACTED_ENTITIES] Symptoms: [] | Reason: None | Doctor: None | Date: None | Time: None | Booking For: SELF
+[LLM_ROUTER] Selected intent      : GREETING
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Symptoms             : []
+[LLM_ROUTER] Booking for          : SELF
+[LLM_ROUTER] Relationship         : None
+[LLM_ROUTER] Appointment date     : None
+[LLM_ROUTER] Appointment time     : None
+[LLM_ROUTER] DOB                  : None (ambiguous=False)
+[LLM_ROUTER] Confidence           : 1.0
+[LLM_ROUTER] Needs clarification  : False
+[LLM_ROUTER] Emergency            : False
+[LLM_ROUTER] Downstream agent     : GREETING_HANDLER
+[LLM_ROUTER] LLM-powered          : True
+[LLM_ROUTER] === END ROUTING ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "வணக்கம்"
+[GROUNDING] Pending stage: 
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE] GREETING with no entities -- clearing booking context
+[LLM_ROUTER] === NEW ROUTING REQUEST ===
+[LLM_ROUTER] Patient message      : "Show my appointments"
+[LLM_ROUTER] Prior intent         : GREETING
+[LLM_ROUTER] Prior department     : None
+[LLM_ROUTER] Booking for          : None
+[LLM_ROUTER] Missing info         : []
+[LLM_ROUTER] Confirmation pending : False
+[LLM_ROUTER] LLM available        : True
+[LLM_ROUTER] LLM raw response     : {
+  "intent": "APPOINTMENT_STATUS",
+  "confidence": 0.99,
+  "appointment_subject": "SELF",
+  "patient_reference": null,
+  "time_filter": "ALL",
+  "symptoms": [],
+  "medical_reason": null,
+  "reason_raw_quote": null,
+  "department": null,
+  "doctor_name": null,
+  "doctor_raw_quote": null,
+  "patient_type": null,
+  "booking_for": "SELF",
+  "relationship": null,
+  "patient_name": null,
+  "patient_nam
+[INTENT_AGENT] Intent: APPOINTMENT_STATUS (Confidence: 0.99)
+[EXTRACTED_ENTITIES] Symptoms: [] | Reason: None | Doctor: None | Date: None | Time: None | Booking For: SELF
+[LLM_ROUTER] Selected intent      : APPOINTMENT_STATUS
+[LLM_ROUTER] Extracted department : None
+[LLM_ROUTER] Symptoms             : []
+[LLM_ROUTER] Booking for          : SELF
+[LLM_ROUTER] Relationship         : None
+[LLM_ROUTER] Appointment date     : None
+[LLM_ROUTER] Appointment time     : None
+[LLM_ROUTER] DOB                  : None (ambiguous=False)
+[LLM_ROUTER] Confidence           : 0.99
+[LLM_ROUTER] Needs clarification  : False
+[LLM_ROUTER] Emergency            : False
+[LLM_ROUTER] Downstream agent     : APPOINTMENT_STATUS_HANDLER
+[LLM_ROUTER] LLM-powered          : True
+[LLM_ROUTER] === END ROUTING ===
+[GROUNDING] --- Grounding validation START ---
+[GROUNDING] User message: "Show my appointments"
+[GROUNDING] Pending stage: 
+[GROUNDING] --- Grounding validation END. Rejected: [] ---
+[STATE_MERGE]   WRITE  entities[symptoms] = []
+[STATE_MERGE]   WRITE  state[appointment_for] = 'SELF'
+
+[OK] TEST 10 PASSED: Language switching preserves conversation state seamlessly.
+[BUTTON_ROUTING] Handling structured button tap: btn_pay_gpay
+
+[OK] TEST 11 PASSED: Payment flow buttons remain strictly isolated.
+[BUTTON_ROUTING] Handling structured button tap: btn_slot_09:00
+[BUTTON_ROUTING] Slot button tap: time=09:00
+[DATE_STATE_DEBUG] btn_slot handler: doctor_id=None, appointment_date=None, appointment_time=09:00, stage=GREETING
+
+[OK] TEST 12 PASSED: Time slot selection behaves deterministically.
+[BUTTON_ROUTING] Handling structured button tap: btn_cat_doctors
+[BUTTON_ROUTING] Handling structured button tap: btn_cat_health
+[BUTTON_ROUTING] Handling structured button tap: btn_my_profile
+[BUTTON_ROUTING] Handling structured button tap: btn_cat_staff
+
+[OK] TEST 13 PASSED: All 4 main menu categories route to functional sub-workflows.

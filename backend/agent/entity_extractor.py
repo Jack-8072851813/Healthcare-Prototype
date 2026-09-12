@@ -228,7 +228,7 @@ def extract_entities(text: str) -> dict:
                     break
 
         # Match department names — ordered from MOST SPECIFIC to LEAST SPECIFIC
-        cur.execute("SELECT id, department_name FROM departments WHERE status = 'ACTIVE';")
+        cur.execute("SELECT id, department_name FROM departments WHERE status = 'ACTIVE' AND department_name NOT LIKE 'DummyDept%';")
         departments = cur.fetchall()
 
         # Build a lookup by name

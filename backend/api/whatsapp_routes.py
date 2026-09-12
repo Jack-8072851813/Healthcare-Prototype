@@ -168,6 +168,11 @@ def get_or_create_whatsapp_session(whatsapp_number: str) -> str:
 def process_and_send_reply(session_code: str, sender_num: str, message_id: str, body_text: str, button_id: str = None):
     t_total_start = time.monotonic()
     masked_num = f"***{sender_num[-4:]}" if sender_num and len(sender_num) >= 4 else "****"
+    if sender_num:
+        try:
+            whatsapp_client.send_typing_indicator(sender_num)
+        except Exception as _te:
+            print(f"[TYPING_INDICATOR] Error sending typing indicator: {_te}")
     try:
         t_agent_start = time.monotonic()
         agent_res = agent_service.process_agent_message(
@@ -180,7 +185,15 @@ def process_and_send_reply(session_code: str, sender_num: str, message_id: str, 
 
         t_send_start = time.monotonic()
         if agent_res.get("interactive_buttons"):
-            send_res = whatsapp_client.send_button_message(sender_num, agent_res["response"], agent_res["interactive_buttons"])
+            list_title = agent_res.get("list_button_title") or "Select Option"
+            sec_title = agent_res.get("section_title") or ("Available Slots" if "slot" in str(agent_res.get("interactive_buttons")).lower() else ("Available Dates" if "date" in str(agent_res.get("interactive_buttons")).lower() else "Options"))
+            send_res = whatsapp_client.send_button_message(
+                sender_num,
+                agent_res["response"],
+                agent_res["interactive_buttons"],
+                list_button_title=list_title,
+                section_title=sec_title
+            )
         else:
             send_res = whatsapp_client.send_text_message(sender_num, agent_res["response"])
         t_send_ms = int((time.monotonic() - t_send_start) * 1000)

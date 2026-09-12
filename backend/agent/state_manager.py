@@ -264,7 +264,7 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
         # Update metadata on the latest message for this conversation in 1 single query
         cur.execute("""
             UPDATE messages
-            SET metadata = %s
+            SET metadata = %s::jsonb
             WHERE id = (
                 SELECT m.id
                 FROM messages m
@@ -273,7 +273,7 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
                 ORDER BY m.id DESC
                 LIMIT 1
             );
-        """, (json.dumps(state_dict), conversation_code))
+        """, (json.dumps(state_dict, default=str), conversation_code))
         conn.commit()
     except Exception as e:
         conn.rollback()

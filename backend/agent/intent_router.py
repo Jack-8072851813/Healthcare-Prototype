@@ -123,7 +123,11 @@ SUPPORTED_INTENTS = {
 
 def log_router_action(msg: str) -> None:
     """Prints structured audit log for Intent Router."""
-    print(f"[ROUTER] {msg}")
+    try:
+        print(f"[ROUTER] {msg}")
+    except UnicodeEncodeError:
+        safe_msg = str(msg).encode("ascii", "backslashreplace").decode("ascii")
+        print(f"[ROUTER] {safe_msg}")
 
 
 def route_patient_message_llm(
@@ -260,7 +264,8 @@ def map_symptom_to_department(message_text: str, is_child: bool = False) -> Tupl
         dept_entities = entity_extractor.extract_entities(message_text)
         if dept_entities.get("department_name"):
             mapped_department = dept_entities["department_name"]
-            medical_reason = message_text
+            if not message_text.strip().lower().startswith("btn_"):
+                medical_reason = message_text
 
     # Pediatrics override for child if general medicine or child symptoms
     if is_child and (mapped_department == "General Medicine" or not mapped_department):
@@ -268,7 +273,7 @@ def map_symptom_to_department(message_text: str, is_child: bool = False) -> Tupl
 
     if not medical_reason and found_symptoms:
         medical_reason = found_symptoms[0]
-    elif not medical_reason and message_text:
+    elif not medical_reason and message_text and not message_text.strip().lower().startswith("btn_") and message_text.strip().lower() not in ["yes", "no", "confirm", "cancel", "today", "tomorrow"]:
         medical_reason = message_text[:50].strip()
 
     return mapped_department, medical_reason, found_symptoms

@@ -148,6 +148,15 @@ def validate_extraction(
             continue
         val = str(raw_val).strip()
         val_lower = val.lower()
+        # Reject button IDs or system command strings as medical reason
+        if val_lower.startswith("btn_") or val_lower in ["yes", "no", "confirm", "cancel", "ok", "sure", "today", "tomorrow"]:
+            _log(
+                f"REJECT {field_key}={val!r} -- equals a button ID or system command",
+                grounding_log,
+            )
+            cleaned[field_key] = None
+            rejected_fields.append(field_key)
+            continue
 
         # 1a. Check against intent labels
         if val_lower in INTENT_LABELS:

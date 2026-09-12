@@ -460,10 +460,12 @@ def _accept_field(state: dict, field: str, value: Any, log_fn, permissive: bool 
                 state["selected_doctor_id"] = None
                 state["selected_doctor_name"] = None
                 state["selected_department_name"] = value
+                state["selected_slot_id"] = None
                 if isinstance(state.get("entities"), dict):
                     state["entities"]["doctor_id"] = None
                     state["entities"]["appointment_date"] = None
                     state["entities"]["appointment_time"] = None
+                    state["entities"]["selected_slot_id"] = None
             elif existing and not permissive:
                 log_fn(f"  CARRY  {field} (already set: {existing!r})")
                 return

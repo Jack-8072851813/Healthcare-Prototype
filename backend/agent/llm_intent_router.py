@@ -166,7 +166,11 @@ VALID_DEPARTMENTS = {
 # ---------------------------------------------------------------------------
 def _log(msg: str) -> None:
     """Structured audit log tagged [LLM_ROUTER]."""
-    print(f"[LLM_ROUTER] {msg}")
+    try:
+        print(f"[LLM_ROUTER] {msg}")
+    except UnicodeEncodeError:
+        safe_msg = str(msg).encode("ascii", "backslashreplace").decode("ascii")
+        print(f"[LLM_ROUTER] {safe_msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +504,7 @@ PATIENT'S MESSAGE:
 "{message_text}"
 
 INSTRUCTIONS:
-- NEW CLINICAL COMPLAINT PRIORITY: When the patient provides a disease, symptom, health complaint, or reason for consultation (including short phrases like "Nose pain", "Ear bleeding", "Throat pain", "Hair Fall problem", "I have Nose pain"), ALWAYS classify intent as BOOK_APPOINTMENT, extract medical_reason, reason_raw_quote, and determine the appropriate department (e.g. Dermatology for hair loss/scalp, ENT for ear/nose/throat, General Medicine for fever/cough), even if an active appointment workflow or previous question exists.
+- NEW CLINICAL COMPLAINT PRIORITY: When the patient provides a disease, symptom, health complaint, or reason for consultation in ANY language (e.g. Tamil, Hindi, Telugu, Malayalam, Kannada, Urdu, English), ALWAYS classify intent as BOOK_APPOINTMENT, extract medical_reason, reason_raw_quote, and semantically determine the appropriate department (e.g. Dermatology for skin/scalp/hair, ENT for ear/nose/throat/sinus, Orthopedics for joint/bone, General Medicine for fever/cough), even if an active appointment workflow or previous question exists. Never default a non-English complaint to General Medicine if it semantically belongs to another configured department.
 - Do NOT force a new clinical complaint into a currently pending date, time, or doctor field.
 - Do NOT carry forward stale doctor or date values when a new clinical complaint is provided in THIS message.
 - Use the conversation state and history to resolve ambiguous short messages.

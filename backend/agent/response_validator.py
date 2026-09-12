@@ -107,4 +107,11 @@ def validate_pre_dispatch(state: Dict[str, Any], response_payload: Dict[str, Any
             print(f"[RESPONSE_VALIDATOR] Blocked mismatched doctor ID {doc_id}: {doc_err}")
             return response_payload
 
+    # 3. Post-Payment UI Cleanup Safeguard: Ensure no pre-payment action buttons remain after payment SUCCESS
+    if state.get("payment_status") == "SUCCESS" and "interactive_buttons" in response_payload:
+        response_payload["interactive_buttons"] = [
+            b for b in response_payload.get("interactive_buttons", [])
+            if not b.get("id", "").startswith("btn_pay_")
+        ]
+
     return response_payload

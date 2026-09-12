@@ -119,6 +119,32 @@ def clean_whatsapp_number(to_number: str) -> str:
     return digits
 
 
+def send_typing_indicator(to_number: str) -> dict:
+    """Send typing indicator (typing_on) status to WhatsApp client."""
+    to_number = clean_whatsapp_number(to_number)
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_number,
+        "type": "typing_status",
+        "typing_status": "typing"
+    }
+    if is_mock_mode():
+        log_outbound_simulation("typing_indicator", to_number, payload)
+        return {"success": True, "status": "typing_on"}
+    url = f"{get_api_url()}/{get_phone_number_id()}/messages"
+    headers = {
+        "Authorization": f"Bearer {get_access_token()}",
+        "Content-Type": "application/json"
+    }
+    try:
+        res = requests.post(url, json=payload, headers=headers, timeout=5)
+        return {"success": res.ok, "status": "typing_on"}
+    except Exception as e:
+        log_outbound_simulation("typing_indicator", to_number, payload)
+        return {"success": True, "status": "typing_on"}
+
+
 def send_text_message(to_number: str, text: str) -> dict:
     """Send text message to a WhatsApp number."""
     to_number = clean_whatsapp_number(to_number)
@@ -159,7 +185,7 @@ def send_text_message(to_number: str, text: str) -> dict:
         return {"success": True, "message_id": f"wam.mock_msg_{uuid.uuid4().hex[:12]}", "fallback": True}
 
 
-def send_button_message(to_number: str, text: str, buttons: list) -> dict:
+def send_button_message(to_number: str, text: str, buttons: list, list_button_title: str = "Select Option", section_title: str = "Options") -> dict:
     """
     Sends a Meta WhatsApp interactive button message.
     Meta API strictly limits reply buttons to max 3 items, and body text to 1024 chars.
@@ -177,7 +203,8 @@ def send_button_message(to_number: str, text: str, buttons: list) -> dict:
 
     if len(buttons) > 3:
         rows = []
-        for btn in buttons:
+        # Meta WhatsApp Cloud API limits interactive list messages to max 10 rows total across all sections.
+        for btn in buttons[:10]:
             b_id = btn.get("id", f"btn_{uuid.uuid4().hex[:6]}")
             b_title = btn.get("title", "Select")[:24]
             b_desc = btn.get("description", "")[:72]
@@ -185,8 +212,8 @@ def send_button_message(to_number: str, text: str, buttons: list) -> dict:
             if b_desc:
                 row_dict["description"] = b_desc
             rows.append(row_dict)
-        sections = [{"title": "Main Menu", "rows": rows}]
-        return send_list_message(to_number, text, "Select Option", sections)
+        sections = [{"title": section_title[:24], "rows": rows}]
+        return send_list_message(to_number, text, list_button_title, sections)
 
     formatted_buttons = []
     for btn in buttons:
@@ -240,12 +267,34 @@ def send_button_message(to_number: str, text: str, buttons: list) -> dict:
 def send_list_message(to_number: str, text: str, button_label: str, sections: list) -> dict:
     """
     Sends a Meta WhatsApp interactive list message.
-    Meta API limits body text to 1024 chars.
+    Meta API limits body text to 1024 chars, and total section rows to max 10.
     """
     to_number = clean_whatsapp_number(to_number)
     if len(text) > 1000:
         send_text_message(to_number, text)
         text = "Please choose an option below:"
+
+    # Enforce Meta API limit: max 10 rows total across all sections
+    cleaned_sections = []
+    total_rows = 0
+    for sec in sections:
+        sec_title = (sec.get("title") or "Options")[:24]
+        sec_rows = sec.get("rows", [])
+        capacity = 10 - total_rows
+        if capacity <= 0:
+            break
+        valid_rows = sec_rows[:capacity]
+        s_rows = []
+        for r in valid_rows:
+            r_id = r.get("id", f"btn_{uuid.uuid4().hex[:6]}")
+            r_title = r.get("title", "Select")[:24]
+            r_dict = {"id": r_id, "title": r_title}
+            if r.get("description"):
+                r_dict["description"] = r["description"][:72]
+            s_rows.append(r_dict)
+            total_rows += 1
+        if s_rows:
+            sanitized_sections.append({"title": sec_title, "rows": s_rows}) if 'sanitized_sections' in locals() else cleaned_sections.append({"title": sec_title, "rows": s_rows})
 
     payload = {
         "messaging_product": "whatsapp",
@@ -257,7 +306,7 @@ def send_list_message(to_number: str, text: str, button_label: str, sections: li
             "body": {"text": text},
             "action": {
                 "button": button_label[:20],
-                "sections": sections
+                "sections": cleaned_sections
             }
         }
     }
