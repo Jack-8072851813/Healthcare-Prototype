@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Send, Mic, RotateCcw, AlertTriangle, Play, Square, Volume2, VolumeX, CheckCheck
+  Send, Mic, RotateCcw, AlertTriangle, Play, Square, Volume2, VolumeX, CheckCheck, Menu, X, ChevronRight
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -15,6 +15,24 @@ interface ChatMessage {
   interactive_type?: string;
   list_button_title?: string;
 }
+
+interface SidebarItem {
+  id: string;
+  icon: string;
+  title: string;
+  description: string;
+  sectionName: string;
+}
+
+const SIDEBAR_SERVICES: SidebarItem[] = [
+  { id: 'btn_cat_appts', icon: '📅', title: 'Appointments', description: 'Book, view, reschedule or cancel', sectionName: 'Appointments' },
+  { id: 'btn_cat_doctors', icon: '👨‍⚕️', title: 'Doctors & Services', description: 'Find doctors and hospital services', sectionName: 'Doctors & Services' },
+  { id: 'btn_cat_health', icon: '📋', title: 'My Health & Records', description: 'Reports, documents and pre-admission', sectionName: 'My Health & Records' },
+  { id: 'btn_cat_billing', icon: '💳', title: 'Billing & Payments', description: 'Bills, balance and insurance', sectionName: 'Billing & Payments' },
+  { id: 'btn_cat_voice_lang', icon: '🎤', title: 'Voice & Language', description: 'Language and voice', sectionName: 'Voice & Language' },
+  { id: 'btn_cat_staff', icon: '🧑‍💼', title: 'Talk to Hospital Staff', description: 'Human support', sectionName: 'Talk to Staff' },
+  { id: 'btn_cat_emergency', icon: '🚨', title: 'Emergency', description: 'Immediate safety route', sectionName: 'Emergency' },
+];
 
 const VOICE_PROMPTS = [
   { text: "Hi, I need an appointment.", lang: "English", display: "🎙️ [EN] \"Hi, I need an appointment.\"" },
@@ -55,6 +73,8 @@ const PatientChat: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [conversationId, setConversationId] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [currentSection, setCurrentSection] = useState('Overview');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   
   // Voice Recording & Playback State
   const [isRecording, setIsRecording] = useState(false);
@@ -77,7 +97,7 @@ const PatientChat: React.FC = () => {
   const recordingTimerRef = useRef<any>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
-  const BASE_URL = 'http://localhost:8000';
+  const BASE_URL = window.location.hostname === '127.0.0.1' ? 'http://127.0.0.1:8000' : 'http://localhost:8000';
 
   // Initialize unique session
   useEffect(() => {
@@ -113,6 +133,7 @@ const PatientChat: React.FC = () => {
   const resetSession = async () => {
     const newId = 'CONV_' + Math.random().toString(36).substr(2, 9).toUpperCase();
     setConversationId(newId);
+    setCurrentSection('Overview');
     stopAudio();
 
     try {
@@ -168,6 +189,14 @@ const PatientChat: React.FC = () => {
   // Text message submit
   const sendMessage = async (textToSend: string, buttonId?: string) => {
     if (!textToSend.trim()) return;
+
+    // Track active section if a category button was clicked
+    const matchedService = SIDEBAR_SERVICES.find(s => s.id === buttonId || textToSend.includes(s.title));
+    if (matchedService) {
+      setCurrentSection(matchedService.sectionName);
+    } else if (buttonId === 'btn_main_menu') {
+      setCurrentSection('Overview');
+    }
 
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsgId = 'msg_' + Date.now();
@@ -227,15 +256,20 @@ const PatientChat: React.FC = () => {
     }
   };
 
-  // Actual Browser Recording Flow
+  // Sidebar item click handler
+  const handleSidebarClick = (item: SidebarItem) => {
+    setCurrentSection(item.sectionName);
+    setMobileSidebarOpen(false);
+    sendMessage(`${item.icon} ${item.title}`, item.id);
+  };
+
+  // Voice Recording Flow
   const handleMicClick = async () => {
     if (isRecording) {
-      // Stop recording
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
     } else {
-      // Start recording
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunksRef.current = [];
@@ -254,7 +288,6 @@ const PatientChat: React.FC = () => {
           const audioFile = new File([audioBlob], 'microphone_voice.wav', { type: 'audio/wav' });
           sendVoiceAudio(audioFile, '🎤 Voice message');
           
-          // Stop all tracks in stream to release microphone light
           stream.getTracks().forEach(track => track.stop());
         };
         
@@ -263,18 +296,16 @@ const PatientChat: React.FC = () => {
         setRecordingStatus('Listening...');
       } catch (err) {
         console.warn("Microphone access failed or unsupported. Launching Voice Simulator modal...", err);
-        // Fallback to simulator modal
         setShowVoiceModal(true);
       }
     }
   };
 
-  // Send Voice audio file to the backend
+  // Send Voice audio file to backend
   const sendVoiceAudio = async (audioFile: File, displayTranscript: string) => {
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsgId = 'msg_voice_' + Date.now();
 
-    // Add voice bubble locally
     const newUserMsg: ChatMessage = {
       id: userMsgId,
       sender: 'PATIENT',
@@ -316,7 +347,6 @@ const PatientChat: React.FC = () => {
 
       setMessages(prev => [...prev, aiMsg]);
       
-      // Auto-play the voice response
       if (data.audio) {
         playAudio(data.audio, aiMsgId);
       }
@@ -342,7 +372,6 @@ const PatientChat: React.FC = () => {
     setRecordingStatus('Listening...');
     setShowVoiceModal(false);
     
-    // Simulate recording duration of 3 seconds
     let seconds = 0;
     const interval = setInterval(() => {
       seconds++;
@@ -352,7 +381,6 @@ const PatientChat: React.FC = () => {
       clearInterval(interval);
       setIsRecording(false);
       
-      // Generate a mock wav blob to satisfy backend API
       const wavHeader = new Uint8Array(44);
       const audioBlob = new Blob([wavHeader], { type: 'audio/wav' });
       const filename = `${selectedPrompt.lang.toLowerCase()}_${selectedPrompt.text.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.wav`;
@@ -372,12 +400,8 @@ const PatientChat: React.FC = () => {
     audioPlayerRef.current = audio;
     setPlayingAudioId(msgId);
     
-    audio.onended = () => {
-      setPlayingAudioId(null);
-    };
-    audio.onerror = () => {
-      setPlayingAudioId(null);
-    };
+    audio.onended = () => setPlayingAudioId(null);
+    audio.onerror = () => setPlayingAudioId(null);
     
     audio.play().catch(err => {
       console.warn("Autoplay was blocked or failed:", err);
@@ -401,55 +425,248 @@ const PatientChat: React.FC = () => {
   return (
     <div style={{
       display: 'flex',
-      height: 'calc(100vh - 64px)',
-      background: '#f0f2f5',
+      height: '100vh',
+      width: '100vw',
+      background: '#d1d7db',
       fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      color: '#303030',
-      justifyContent: 'center',
-      alignItems: 'center'
+      color: '#111b21',
+      overflow: 'hidden',
+      position: 'relative'
     }}>
+      {/* LEFT SIDEBAR - PATIENT SERVICES */}
+      <div 
+        className={`patient-sidebar ${mobileSidebarOpen ? 'open' : ''}`}
+        style={{
+          width: '320px',
+          minWidth: '320px',
+          flexShrink: 0,
+          background: '#ffffff',
+          borderRight: '1px solid #e9edef',
+          display: 'flex',
+          flexDirection: 'column',
+          zIndex: 100,
+          boxShadow: '2px 0 8px rgba(0,0,0,0.05)',
+          transition: 'transform 0.3s ease'
+        }}
+      >
+        {/* Sidebar Header: Meridian Hospital Branding */}
+        <div style={{
+          padding: '16px 20px',
+          background: '#075E54',
+          color: '#ffffff',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                background: '#ffffff',
+                color: '#075E54',
+                fontWeight: 800,
+                fontSize: '15px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
+              }}>
+                MH
+              </div>
+              <div style={{ fontWeight: 700, fontSize: '17px', letterSpacing: '-0.2px' }}>
+                Meridian Hospital
+              </div>
+            </div>
+            {/* Close button for mobile */}
+            <button 
+              onClick={() => setMobileSidebarOpen(false)}
+              className="mobile-close-btn"
+              style={{
+                display: 'none',
+                background: 'none',
+                border: 'none',
+                color: '#ffffff',
+                cursor: 'pointer'
+              }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div style={{ fontSize: '11.5px', opacity: 0.9, fontWeight: 500, paddingLeft: '46px', marginTop: '-4px' }}>
+            AI Patient Desk • WhatsApp Experience
+          </div>
+        </div>
+
+        {/* Sidebar Navigation Title */}
+        <div style={{
+          padding: '14px 20px 8px 20px',
+          fontSize: '11px',
+          fontWeight: 800,
+          color: '#075E54',
+          letterSpacing: '0.8px',
+          textTransform: 'uppercase',
+          background: '#f8f9fa',
+          borderBottom: '1px solid #f0f2f5'
+        }}>
+          PATIENT SERVICES
+        </div>
+
+        {/* Sidebar Navigation Links */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '8px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px'
+        }}>
+          {SIDEBAR_SERVICES.map((item) => {
+            const isActive = currentSection === item.sectionName;
+            return (
+              <div
+                key={item.id}
+                onClick={() => handleSidebarClick(item)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  background: isActive ? '#e8f5e9' : 'transparent',
+                  borderLeft: isActive ? '4px solid #128C7E' : '4px solid transparent',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={(e) => {
+                  if (!isActive) e.currentTarget.style.background = '#f5f6f6';
+                }}
+                onMouseOut={(e) => {
+                  if (!isActive) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <div style={{ fontSize: '20px', marginRight: '12px', minWidth: '24px', textAlign: 'center' }}>
+                  {item.icon}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ 
+                    fontWeight: isActive ? 700 : 600, 
+                    fontSize: '13.5px', 
+                    color: isActive ? '#075E54' : '#111b21',
+                    lineHeight: 1.2
+                  }}>
+                    {item.title}
+                  </div>
+                  <div style={{ 
+                    fontSize: '11px', 
+                    color: '#667781', 
+                    whiteSpace: 'nowrap', 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
+                    marginTop: '2px'
+                  }}>
+                    {item.description}
+                  </div>
+                </div>
+                <ChevronRight size={14} style={{ color: isActive ? '#128C7E' : '#aebac1', marginLeft: '6px' }} />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Sidebar Footer info */}
+        <div style={{
+          padding: '12px 16px',
+          background: '#f0f2f5',
+          borderTop: '1px solid #e9edef',
+          fontSize: '11px',
+          color: '#54656f',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <span>24/7 AI Desk Active</span>
+          <button
+            onClick={resetSession}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#128C7E',
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <RotateCcw size={12} /> Reset
+          </button>
+        </div>
+      </div>
+
+      {/* CENTER CHAT AREA */}
       <div style={{
-        width: '100%',
-        maxWidth: '850px',
-        height: '100%',
+        flex: 1,
         display: 'flex',
         flexDirection: 'column',
+        height: '100%',
         background: '#efeae2',
-        position: 'relative',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.05)'
+        position: 'relative'
       }}>
-        {/* Branding Header */}
+        {/* Chat Header */}
         <div style={{
           height: '60px',
           background: '#075E54',
           color: '#ffffff',
           display: 'flex',
           alignItems: 'center',
-          padding: '0 20px',
+          padding: '0 16px',
           justifyContent: 'space-between',
           zIndex: 10,
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Mobile menu toggle button */}
+            <button 
+              onClick={() => setMobileSidebarOpen(true)}
+              className="mobile-menu-btn"
+              style={{
+                display: 'none',
+                background: 'none',
+                border: 'none',
+                color: '#ffffff',
+                cursor: 'pointer',
+                padding: '4px'
+              }}
+            >
+              <Menu size={22} />
+            </button>
+
             <div style={{
-              width: '40px',
-              height: '40px',
+              width: '38px',
+              height: '38px',
               borderRadius: '50%',
               background: '#ffffff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#075E54',
-              fontWeight: 700,
-              fontSize: '16px'
+              fontWeight: 800,
+              fontSize: '15px'
             }}>
               MH
             </div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: '15px' }}>Meridian Hospital Patient Desk</div>
-              <div style={{ fontSize: '12px', opacity: 0.9, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#25D366', display: 'inline-block' }} />
-                Online AI Assistant
+              <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>Meridian Hospital</span>
+                <span style={{ fontSize: '13px', opacity: 0.85, fontWeight: 400 }}>—</span>
+                <span style={{ fontSize: '13.5px', color: '#a7ffeb', fontWeight: 600 }}>{currentSection}</span>
+              </div>
+              <div style={{ fontSize: '11.5px', opacity: 0.9, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#25D366', display: 'inline-block' }} />
+                AI Patient Desk • WhatsApp Experience
               </div>
             </div>
           </div>
@@ -462,7 +679,7 @@ const PatientChat: React.FC = () => {
               border: 'none',
               borderRadius: '20px',
               padding: '6px 14px',
-              fontSize: '12.5px',
+              fontSize: '12px',
               fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',
@@ -473,16 +690,16 @@ const PatientChat: React.FC = () => {
             onMouseOver={(e) => e.currentTarget.style.background = '#0b665c'}
             onMouseOut={(e) => e.currentTarget.style.background = '#128C7E'}
           >
-            <RotateCcw size={14} />
+            <RotateCcw size={13} />
             Start Over
           </button>
         </div>
 
-        {/* Scrollable messages container */}
+        {/* Scrollable Chat Messages Container */}
         <div style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '24px 30px',
+          padding: '20px 24px',
           display: 'flex',
           flexDirection: 'column',
           gap: '12px'
@@ -494,13 +711,14 @@ const PatientChat: React.FC = () => {
                   alignSelf: 'center',
                   background: '#ffe0b2',
                   color: '#e65100',
-                  padding: '6px 12px',
+                  padding: '6px 14px',
                   borderRadius: '6px',
                   fontSize: '12px',
                   fontWeight: 600,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '6px',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                 }}>
                   <AlertTriangle size={14} />
                   <span>{m.text}</span>
@@ -514,19 +732,19 @@ const PatientChat: React.FC = () => {
                 key={m.id} 
                 style={{
                   alignSelf: isAgent ? 'flex-start' : 'flex-end',
-                  maxWidth: '75%',
+                  maxWidth: '82%',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px'
                 }}
               >
-                {/* Bubble card */}
+                {/* Message Card Bubble */}
                 <div style={{
                   background: isAgent ? '#ffffff' : '#d9fdd3',
                   color: '#111b21',
-                  padding: '8px 12px',
+                  padding: '10px 14px',
                   borderRadius: isAgent ? '0px 12px 12px 12px' : '12px 0px 12px 12px',
-                  fontSize: '14.5px',
+                  fontSize: '14px',
                   lineHeight: '1.45',
                   boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                   position: 'relative'
@@ -559,7 +777,7 @@ const PatientChat: React.FC = () => {
                           border: '1.5px solid #128C7E',
                           borderRadius: '8px',
                           fontWeight: 700,
-                          fontSize: '14px',
+                          fontSize: '13.5px',
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
@@ -604,11 +822,11 @@ const PatientChat: React.FC = () => {
                                 e.currentTarget.style.transform = 'none';
                               }}
                             >
-                              <div style={{ fontWeight: 700, fontSize: '14px', color: '#075E54' }}>
+                              <div style={{ fontWeight: 700, fontSize: '13.5px', color: '#075E54' }}>
                                 {btn.title}
                               </div>
                               {btn.description && (
-                                <div style={{ fontSize: '12px', color: '#54656f', marginTop: '2px', lineHeight: 1.3 }}>
+                                <div style={{ fontSize: '11.5px', color: '#54656f', marginTop: '2px', lineHeight: 1.3 }}>
                                   {btn.description}
                                 </div>
                               )}
@@ -627,7 +845,7 @@ const PatientChat: React.FC = () => {
                               borderRadius: '8px',
                               color: '#075E54',
                               fontWeight: 600,
-                              fontSize: '13.5px',
+                              fontSize: '13px',
                               cursor: 'pointer',
                               textAlign: 'center',
                               boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
@@ -694,7 +912,7 @@ const PatientChat: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Timestamp */}
+                  {/* Timestamp & Blue Tick */}
                   <div style={{
                     fontSize: '10px',
                     color: '#667781',
@@ -728,7 +946,7 @@ const PatientChat: React.FC = () => {
               gap: '6px'
             }}>
               <span className="dot-blink" style={{ display: 'inline-block', width: '6px', height: '6px', background: '#999', borderRadius: '50%' }}></span>
-              Agent is typing...
+              Meridian AI Assistant is typing...
             </div>
           )}
 
@@ -754,23 +972,59 @@ const PatientChat: React.FC = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Bar */}
+        {/* BOTTOM MESSAGE COMPOSER */}
         <div style={{
-          height: '62px',
+          height: '64px',
           background: '#f0f2f5',
           display: 'flex',
           alignItems: 'center',
           padding: '0 16px',
-          gap: '12px',
+          gap: '10px',
           borderTop: '1px solid #e0e0e0'
         }}>
+          {/* Emoji button */}
+          <button
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '20px',
+              cursor: 'pointer',
+              opacity: 0.75,
+              padding: '4px'
+            }}
+            title="Emoji"
+          >
+            😊
+          </button>
+
+          {/* Text Input */}
+          <input 
+            type="text"
+            placeholder="Message Meridian Hospital..."
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={handleKeyPress}
+            disabled={isRecording}
+            style={{
+              flex: 1,
+              height: '44px',
+              background: '#ffffff',
+              border: 'none',
+              outline: 'none',
+              borderRadius: '8px',
+              padding: '0 16px',
+              fontSize: '14.5px',
+              boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)'
+            }}
+          />
+
           {/* Microphone button */}
           <button
             onClick={handleMicClick}
             title={isRecording ? "Stop Recording" : "Record Voice Message"}
             style={{
-              width: '40px',
-              height: '40px',
+              width: '42px',
+              height: '42px',
               borderRadius: '50%',
               border: 'none',
               background: isRecording ? '#c62828' : '#128C7E',
@@ -786,32 +1040,13 @@ const PatientChat: React.FC = () => {
             {isRecording ? <Square size={16} /> : <Mic size={20} />}
           </button>
 
-          <input 
-            type="text"
-            placeholder="Type a message..."
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyPress}
-            disabled={isRecording}
-            style={{
-              flex: 1,
-              height: '42px',
-              background: '#ffffff',
-              border: 'none',
-              outline: 'none',
-              borderRadius: '8px',
-              padding: '0 16px',
-              fontSize: '14.5px',
-              boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)'
-            }}
-          />
-
+          {/* Send Arrow Button */}
           <button
             onClick={() => sendMessage(inputText)}
             disabled={isRecording || !inputText.trim()}
             style={{
-              width: '40px',
-              height: '40px',
+              width: '42px',
+              height: '42px',
               borderRadius: '50%',
               border: 'none',
               background: (!inputText.trim() || isRecording) ? '#b0bec5' : '#128C7E',
@@ -820,7 +1055,8 @@ const PatientChat: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'background 0.2s'
             }}
           >
             <Send size={18} />
@@ -845,7 +1081,7 @@ const PatientChat: React.FC = () => {
           <div style={{
             background: '#ffffff',
             width: '100%',
-            maxWidth: '850px',
+            maxWidth: '650px',
             borderTopLeftRadius: '16px',
             borderTopRightRadius: '16px',
             boxShadow: '0 -4px 30px rgba(0,0,0,0.2)',
@@ -1077,7 +1313,7 @@ const PatientChat: React.FC = () => {
         </div>
       )}
 
-      {/* Simple blink animation and recording pulse */}
+      {/* Responsive Styles & Animations */}
       <style>{`
         .dot-blink {
           animation: blink 1.4s infinite both;
@@ -1090,6 +1326,22 @@ const PatientChat: React.FC = () => {
         @keyframes pulse {
           0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.4); }
           100% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(198, 40, 40, 0); }
+        }
+        @media (max-width: 768px) {
+          .patient-sidebar {
+            position: absolute !important;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            transform: translateX(-100%);
+            box-shadow: 4px 0 15px rgba(0,0,0,0.2) !important;
+          }
+          .patient-sidebar.open {
+            transform: translateX(0) !important;
+          }
+          .mobile-menu-btn, .mobile-close-btn {
+            display: flex !important;
+          }
         }
       `}</style>
     </div>

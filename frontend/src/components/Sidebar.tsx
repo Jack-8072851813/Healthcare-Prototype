@@ -23,12 +23,13 @@ const Sidebar: React.FC = () => {
 
   const adminMenuItems: MenuItem[] = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/admin/dashboard' },
+    { label: 'WhatsApp Patient Desk', icon: Bot, path: '/patient-chat' },
     { label: 'Patients', icon: Users, path: '/admin/patients' },
     { label: 'Doctors', icon: UserCog, path: '/admin/doctors' },
     { label: 'Doctor Schedules', icon: Clock, path: '/admin/schedules' },
     { label: 'Appointments', icon: CalendarCheck, path: '/admin/appointments' },
     { label: 'Departments', icon: Building2, path: '/admin/departments' },
-    { label: 'AI Patient Desk', icon: Bot, path: '/admin/ai-desk' },
+    { label: 'AI Patient Analytics', icon: BarChart3, path: '/admin/ai-desk' },
     { label: 'Human Escalation', icon: AlertCircle, path: '/admin/escalations' },
     { label: 'Pre-Admission', icon: ClipboardList, path: '/admin/pre-admission' },
     { label: 'Reports', icon: BarChart3, path: '/admin/reports' },
@@ -38,6 +39,7 @@ const Sidebar: React.FC = () => {
 
   const doctorMenuItems: MenuItem[] = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/doctor/dashboard' },
+    { label: 'WhatsApp Patient Desk', icon: Bot, path: '/patient-chat' },
     { label: 'Appointments', icon: CalendarCheck, path: '/doctor/appointments' },
     { label: 'Patient Records', icon: FileText, path: '/doctor/patient-records' },
     { label: 'Clinical Notes', icon: ClipboardPlus, path: '/doctor/clinical-notes' },

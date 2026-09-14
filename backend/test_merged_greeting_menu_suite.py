@@ -22,18 +22,16 @@ from agent.language_service import get_main_menu_buttons, get_translated_button
 class TestMergedGreetingMenuSuite(unittest.TestCase):
 
     def test_01_main_menu_buttons_count_and_keys(self):
-        """Verifies get_main_menu_buttons returns exactly the 10 required options."""
+        """Verifies get_main_menu_buttons returns exactly the 8 HTML category options."""
         buttons_en = get_main_menu_buttons("ENGLISH")
-        self.assertEqual(len(buttons_en), 10)
+        self.assertEqual(len(buttons_en), 8)
         expected_ids = [
+            "btn_cat_appts",
             "btn_cat_doctors",
+            "btn_cat_inquiries",
             "btn_cat_health",
-            "btn_book_appt",
-            "btn_doctor_avail",
-            "btn_my_appts",
-            "btn_cancel_appt",
-            "btn_reschedule_appt",
-            "btn_hosp_info",
+            "btn_cat_billing",
+            "btn_cat_voice_lang",
             "btn_cat_staff",
             "btn_cat_emergency"
         ]
@@ -41,7 +39,7 @@ class TestMergedGreetingMenuSuite(unittest.TestCase):
         self.assertEqual(actual_ids, expected_ids)
 
     def test_02_greeting_message_returns_all_10_options(self):
-        """Verifies 'Hi' returns 'Welcome back...' and all 10 interactive buttons."""
+        """Verifies 'Hi' returns greeting and all 8 interactive category buttons."""
         state = {"entities": {}, "conversation_state": "GREETING", "patient_id": 1}
         with patch("agent.state_manager.get_conversation_state", return_value=state), \
              patch("agent.state_manager.save_conversation_state"), \
@@ -54,7 +52,7 @@ class TestMergedGreetingMenuSuite(unittest.TestCase):
 
             resp = process_agent_message("CONV_GREET_10", "P1001", "Hi")
             self.assertIn("Welcome back", resp["response"])
-            self.assertEqual(len(resp["interactive_buttons"]), 10)
+            self.assertEqual(len(resp["interactive_buttons"]), 8)
 
     def test_03_tap_book_appointment(self):
         """Verifies tapping Book Appointment starts appointment booking."""
@@ -150,11 +148,11 @@ class TestMergedGreetingMenuSuite(unittest.TestCase):
             self.assertIn("Emergency", resp["response"])
 
     def test_10_multilingual_greeting_buttons(self):
-        """Verifies greeting menu translates buttons into Tamil properly."""
+        """Verifies greeting menu translates category buttons into Tamil properly."""
         buttons_ta = get_main_menu_buttons("TAMIL")
-        self.assertEqual(len(buttons_ta), 10)
-        self.assertEqual(buttons_ta[0]["title"], "மருத்துவர் & சேவை")
-        self.assertEqual(buttons_ta[2]["title"], "முன்பதிவு செய்ய")
+        self.assertEqual(len(buttons_ta), 8)
+        self.assertEqual(buttons_ta[0]["title"], "அப்பாயிண்ட்மெண்ட்")
+        self.assertEqual(buttons_ta[1]["title"], "மருத்துவர் & சேவை")
 
 
 if __name__ == "__main__":

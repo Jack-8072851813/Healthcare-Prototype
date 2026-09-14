@@ -84,11 +84,21 @@ const AIPatientDesk: React.FC = () => {
             <h2>Meridian AI Patient Desk</h2>
             <p>AI-powered conversational assistance — live data from database</p>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={loadData} disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-            Refresh
-          </button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button 
+              className="btn btn-primary btn-sm" 
+              onClick={() => window.open('/patient-chat', '_blank')}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#075E54', borderColor: '#075E54' }}
+            >
+              <Bot size={14} />
+              Open Live WhatsApp Patient Desk
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={loadData} disabled={loading}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 

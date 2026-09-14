@@ -29,19 +29,23 @@ class TestContextualButtonsAndMultilingual(unittest.TestCase):
             conn.close()
 
     def test_01_greeting_hi_presents_4_categories_no_booking(self):
-        """TEST 1: 'Hi' returns Greeting + 4 main category buttons, never starting booking."""
+        """TEST 1: 'Hi' returns Greeting + 8 main category buttons, never starting booking."""
         res = agent_service.process_agent_message(self.conv_code, None, "Hi")
         buttons = res.get("interactive_buttons", [])
         btn_ids = [b["id"] for b in buttons]
         btn_titles = [b["title"] for b in buttons]
 
+        self.assertIn("btn_cat_appts", btn_ids)
         self.assertIn("btn_cat_doctors", btn_ids)
+        self.assertIn("btn_cat_inquiries", btn_ids)
         self.assertIn("btn_cat_health", btn_ids)
+        self.assertIn("btn_cat_billing", btn_ids)
+        self.assertIn("btn_cat_voice_lang", btn_ids)
         self.assertIn("btn_cat_staff", btn_ids)
         self.assertIn("btn_cat_emergency", btn_ids)
-        self.assertEqual(len(buttons), 4)
+        self.assertEqual(len(buttons), 8)
         self.assertNotIn("AWAITING_SYMPTOM", str(res.get("response")))
-        print("\n[OK] TEST 1 PASSED: Greeting 'Hi' displays exactly 4 main categories with zero auto-booking.")
+        print("\n[OK] TEST 1 PASSED: Greeting 'Hi' displays exactly 8 main categories with zero auto-booking.")
 
     def test_02_reschedule_workflow_no_unrelated_buttons(self):
         """TEST 2 & 3: Reschedule workflow isolation and relative date resolution."""
