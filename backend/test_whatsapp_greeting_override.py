@@ -23,9 +23,9 @@ def test_greeting_overrides_active_booking_intent():
     
     # 1. Setup clean initial state
     state = state_manager.get_conversation_state(conv_code)
-    state["patient_id"] = 1 # Valid test patient
+    state["patient_id"] = 596 # Valid test patient
     state["entities"] = {
-        "patient_id": 1,
+        "patient_id": 596,
         "doctor_id": 5,
         "department_id": 17,
         "appointment_date": "2026-09-03",

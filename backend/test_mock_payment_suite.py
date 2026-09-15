@@ -187,5 +187,28 @@ class TestMockPaymentSuite(unittest.TestCase):
         btn_ids = [b["id"] for b in res.get("interactive_buttons", [])]
         self.assertIn("btn_pay_gpay", btn_ids)
 
+    def test_09_mock_payment_pay_800_success_with_time_normalization(self):
+        """Sending 'Pay ₹800' should normalize 12h time strings and confirm appointment with status SUCCESS."""
+        agent_service.process_agent_message(self.conv_code, None, f"btn_slot_{self.test_slot}")
+        agent_service.process_agent_message(self.conv_code, None, "btn_confirm_appt")
+        agent_service.process_agent_message(self.conv_code, None, "btn_pay_gpay")
+        
+        # Inject 12h time string in state to test normalization
+        state = state_manager.get_conversation_state(self.conv_code)
+        state["entities"]["appointment_time"] = "10:30 AM"
+        state_manager.save_conversation_state(self.conv_code, state)
+
+        res = agent_service.process_agent_message(self.conv_code, None, "Pay ₹800")
+        print("\n[Mock Payment Pay ₹800 Response]:\n", res["response"])
+
+        self.assertIn("Payment successful!", res["response"])
+        self.assertIn("Your appointment has been confirmed!", res["response"])
+        self.assertIn("Appointment ID:", res["response"])
+
+        state_after = state_manager.get_conversation_state(self.conv_code)
+        self.assertEqual(state_after.get("payment_status"), "SUCCESS")
+        self.assertIsNotNone(state_after.get("booking_id"))
+
 if __name__ == "__main__":
     unittest.main()
+

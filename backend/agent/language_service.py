@@ -277,7 +277,14 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_main_menu": "Main Menu",
         "btn_g_male": "Male",
         "btn_g_female": "Female",
-        "btn_g_other": "Other"
+        "btn_g_other": "Other",
+        "btn_patient_help": "Talk to Staff",
+        "btn_change_profile": "Change Profile",
+        "btn_update_name": "Change Name",
+        "btn_update_dob": "Change Date of Birth",
+        "btn_update_gender": "Change Gender",
+        "btn_update_phone": "Change Phone Number",
+        "btn_back_profile": "Back to Profile"
     },
     "TAMIL": {
         "btn_cat_appts": "அப்பாயிண்ட்மெண்ட்",
@@ -314,7 +321,13 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "கட்டண தகவல்",
         "btn_preadm_inq": "சேர்க்கை தகவல்",
         "btn_continue_ai": "AI-யுடன் தொடர",
-        "btn_main_menu": "முதன்மை மெனு"
+        "btn_main_menu": "முதன்மை மெனு",
+        "btn_change_profile": "சுயவிவரத்தை மாற்ற",
+        "btn_update_name": "பெயரை மாற்ற",
+        "btn_update_dob": "பிறந்த தேதியை மாற்ற",
+        "btn_update_gender": "பாலினத்தை மாற்ற",
+        "btn_update_phone": "தொலைபேசி எண்ணை மாற்ற",
+        "btn_back_profile": "சுயவிவரத்திற்கு திரும்ப"
     },
     "HINDI": {
         "btn_cat_appts": "अपॉइंटमेंट",
@@ -351,7 +364,13 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "बिलिंग जानकारी",
         "btn_preadm_inq": "प्री-एडमिशन जानकारी",
         "btn_continue_ai": "AI जारी रखें",
-        "btn_main_menu": "मुख्य मेनू"
+        "btn_main_menu": "मुख्य मेनू",
+        "btn_change_profile": "प्रोफ़ाइल बदलें",
+        "btn_update_name": "नाम बदलें",
+        "btn_update_dob": "जन्म तिथि बदलें",
+        "btn_update_gender": "लिंग बदलें",
+        "btn_update_phone": "फोन नंबर बदलें",
+        "btn_back_profile": "प्रोफ़ाइल पर वापस जाएं"
     },
     "TELUGU": {
         "btn_cat_appts": "అపాయింట్‌మెంట్‌లు",
@@ -388,7 +407,13 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "బిల్లింగ్ సమాచారం",
         "btn_preadm_inq": "అడ్మిషన్ సమాచారం",
         "btn_continue_ai": "AI తో కొనసాగించు",
-        "btn_main_menu": "ముఖ్య మెనూ"
+        "btn_main_menu": "ముఖ్య మెనూ",
+        "btn_change_profile": "ప్రొఫైల్ మార్చండి",
+        "btn_update_name": "పేరు మార్చండి",
+        "btn_update_dob": "పుట్టిన తేదీ మార్చండి",
+        "btn_update_gender": "లింగం మార్చండి",
+        "btn_update_phone": "ఫోన్ నంబర్ మార్చండి",
+        "btn_back_profile": "ప్రొఫైల్‌కు తిరిగి వెళ్లండి"
     },
     "MALAYALAM": {
         "btn_cat_appts": "അപ്പോയിന്റ്മെന്റുകൾ",
@@ -425,7 +450,13 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "ബില്ലിംഗ് വിവരങ്ങൾ",
         "btn_preadm_inq": "അഡ്മിഷൻ വിവരങ്ങൾ",
         "btn_continue_ai": "AI തുടരുക",
-        "btn_main_menu": "പ്രധാന മെനു"
+        "btn_main_menu": "പ്രധാന മെനു",
+        "btn_change_profile": "പ്രൊഫൈൽ മാറ്റുക",
+        "btn_update_name": "പേര് മാറ്റുക",
+        "btn_update_dob": "ജനനതീയതി മാറ്റുക",
+        "btn_update_gender": "ലിംഗം മാറ്റുക",
+        "btn_update_phone": "ഫോൺ നമ്പർ മാറ്റുക",
+        "btn_back_profile": "പ്രൊഫൈലിലേക്ക് മടങ്ങുക"
     },
     "KANNADA": {
         "btn_cat_appts": "ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್",
@@ -462,7 +493,13 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "ಬಿಲ್ಲಿಂಗ್ ಮಾಹಿತಿ",
         "btn_preadm_inq": "ಪ್ರವೇಶ ಮಾಹಿತಿ",
         "btn_continue_ai": "AI ಯೊಂದಿಗೆ ಮುಂದುವರಿಯಿರಿ",
-        "btn_main_menu": "ಮುಖ್ಯ ಮೆನು"
+        "btn_main_menu": "ಮುಖ್ಯ ಮೆನು",
+        "btn_change_profile": "ಪ್ರೊಫೈಲ್ ಬದಲಾಯಿಸಿ",
+        "btn_update_name": "ಹೆಸರು ಬದಲಾಯಿಸಿ",
+        "btn_update_dob": "ಹುಟ್ಟಿದ ದಿನಾಂಕ ಬದಲಾಯಿಸಿ",
+        "btn_update_gender": "ಲಿಂಗ ಬದಲಾಯಿಸಿ",
+        "btn_update_phone": "ಫೋನ್ ಸಂಖ್ಯೆ ಬದಲಾಯಿಸಿ",
+        "btn_back_profile": "ಪ್ರೊಫೈಲ್‌ಗೆ ಹಿಂತಿರುಗಿ"
     },
     "URDU": {
         "btn_cat_appts": "اپائنٹمنٹس",
@@ -499,7 +536,13 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "بلنگ معلومات",
         "btn_preadm_inq": "داخلہ معلومات",
         "btn_continue_ai": "AI کے ساتھ جاری رکھیں",
-        "btn_main_menu": "مین مینو"
+        "btn_main_menu": "مین مینو",
+        "btn_change_profile": "پروفائل تبدیل کریں",
+        "btn_update_name": "نام تبدیل کریں",
+        "btn_update_dob": "تاریخ پیدائش تبدیل کریں",
+        "btn_update_gender": "جنس تبدیل کریں",
+        "btn_update_phone": "فون نمبر تبدیل کریں",
+        "btn_back_profile": "پروفائل پر واپس جائیں"
     }
 }
 
@@ -520,8 +563,14 @@ def get_translated_button(btn_id: str, language: str = "ENGLISH") -> dict:
     lang = language.upper() if language else "ENGLISH"
     if lang not in MENU_BUTTON_TRANSLATIONS:
         lang = "ENGLISH"
-    title = MENU_BUTTON_TRANSLATIONS[lang].get(btn_id, MENU_BUTTON_TRANSLATIONS["ENGLISH"].get(btn_id, btn_id))
-    res = {"id": btn_id, "title": str(title)[:20]}
+    raw_title = MENU_BUTTON_TRANSLATIONS[lang].get(btn_id, MENU_BUTTON_TRANSLATIONS["ENGLISH"].get(btn_id, btn_id))
+    if isinstance(raw_title, str) and raw_title.startswith("btn_"):
+        raw_title = raw_title.replace("btn_cat_", "").replace("btn_", "").replace("_", " ").title()
+        if btn_id == "btn_patient_help":
+            raw_title = "Talk to Staff"
+        elif btn_id == "btn_emergency":
+            raw_title = "Emergency"
+    res = {"id": btn_id, "title": str(raw_title)[:20]}
     if btn_id in MENU_BUTTON_DESCRIPTIONS:
         res["description"] = MENU_BUTTON_DESCRIPTIONS[btn_id]
     return res

@@ -828,3 +828,21 @@ export async function fetchPreAdmissionConversation(id: number): Promise<{
   const data = await apiFetch<any>(`/api/dashboard/pre-admissions/${id}/conversation`);
   return data ?? { success: false, pre_admission_id: id, patient_name: '', messages: [] };
 }
+
+export interface AddPatientWhatsAppResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+  whatsapp_number?: string;
+  is_existing?: boolean;
+  patient_name?: string;
+}
+
+export async function addPatientWhatsApp(whatsapp_number: string): Promise<AddPatientWhatsAppResponse> {
+  const data = await apiFetch<AddPatientWhatsAppResponse>('/api/dashboard/patients/add-whatsapp', {
+    method: 'POST',
+    body: JSON.stringify({ whatsapp_number }),
+  });
+  return data ?? { success: false, message: 'Server connection error.', error: 'Server connection error.' };
+}
+

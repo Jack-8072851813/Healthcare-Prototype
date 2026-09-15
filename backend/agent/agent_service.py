@@ -69,6 +69,24 @@ def format_safe_gender(gender_raw) -> str:
         return g
     return "-"
 
+def format_patient_full_name(first_name: str = None, last_name: str = None, full_name: str = None) -> str:
+    """Formats patient name safely. Prevents rendering 'None', 'null', 'undefined', 'N/A', or '.'."""
+    invalid_terms = {"none", "null", "undefined", "n/a", "none none", ".", ""}
+    
+    if full_name and isinstance(full_name, str) and full_name.strip():
+        parts = [p.strip() for p in full_name.strip().split() if p.strip().lower() not in invalid_terms]
+        if parts:
+            return " ".join(parts)
+            
+    parts = []
+    if first_name and isinstance(first_name, str) and first_name.strip() and first_name.strip().lower() not in invalid_terms:
+        parts.append(first_name.strip())
+    if last_name and isinstance(last_name, str) and last_name.strip() and last_name.strip().lower() not in invalid_terms:
+        parts.append(last_name.strip())
+        
+    return " ".join(parts) if parts else "Patient"
+
+
 def get_specialist_titles(d_name: str) -> tuple:
     mapping = {
         "Dermatology": ("Dermatologist", "Dermatologists"),
@@ -897,6 +915,43 @@ def handle_unknown_patient_identification_flow(
         language_service.get_translated_button("btn_emergency", current_lang)
     ]
 
+    # Check if patient exists for whatsapp_val before entering registration or identification gate
+    if whatsapp_val and whatsapp_val != "919999999999":
+        lookup = patient_id_service.identify_patient_by_phone(whatsapp_val)
+        if lookup.get("found") and lookup.get("patient"):
+            p_data = lookup["patient"]
+            pat_id = p_data["id"]
+            p_code = p_data.get("patient_code") or f"P{pat_id}"
+            full_name = format_patient_full_name(p_data.get("first_name"), p_data.get("last_name"), p_data.get("full_name"))
+
+            conn = db_config.get_db_connection()
+            cur = conn.cursor()
+            try:
+                cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (pat_id, conversation_code))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+            finally:
+                cur.close()
+                conn.close()
+
+            state["patient_id"] = pat_id
+            state["entities"]["patient_id"] = pat_id
+            state["patient_identification_stage"] = "COMPLETED"
+            state["interactive_buttons"] = main_menu_buttons
+
+            resp = f"Welcome back, {full_name}! 👋\n\nHow can I help you today?"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_IDENTIFICATION", state)
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "PATIENT_IDENTIFICATION",
+                "response": resp,
+                "interactive_buttons": main_menu_buttons
+            }
+
     # --- Button / Option Triggers ---
     if btn_id in ("btn_first_time", "btn_first_time_visitor") or any(kw in msg_raw.lower() for kw in ["first-time visitor", "first time visitor", "first time", "first-time", "new patient"]):
         stage = "REGISTRATION"
@@ -1044,11 +1099,11 @@ def handle_unknown_patient_identification_flow(
                 if p_name_is and entity_extractor.is_valid_person_name(p_name_is.group(1).strip()):
                     n_parts = p_name_is.group(1).strip().split(None, 1)
                     reg_fields["first_name"] = n_parts[0].capitalize()
-                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else None
                 elif entity_extractor.is_valid_person_name(msg_raw):
                     n_parts = msg_raw.split(None, 1)
                     reg_fields["first_name"] = n_parts[0].capitalize()
-                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else None
 
             if not reg_fields.get("date_of_birth"):
                 dob_extracted = date_normalizer.parse_and_normalize_date(msg_raw)[0]
@@ -1160,7 +1215,7 @@ def handle_unknown_patient_identification_flow(
                 p_data = lookup["patient"]
                 pat_id = p_data["id"]
                 p_code = p_data.get("patient_code") or f"P{pat_id}"
-                full_name = p_data.get("full_name") or f"{reg_fields['first_name']} {reg_fields.get('last_name', '')}".strip()
+                full_name = format_patient_full_name(p_data.get("first_name") or reg_fields.get("first_name"), p_data.get("last_name") or reg_fields.get("last_name"), p_data.get("full_name"))
 
                 cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (pat_id, conversation_code))
                 if whatsapp_val and whatsapp_val != "919999999999":
@@ -1212,7 +1267,7 @@ def handle_unknown_patient_identification_flow(
                 state["patient_identification_stage"] = "COMPLETED"
                 state["interactive_buttons"] = main_menu_buttons
 
-                full_name = f"{reg_fields['first_name']} {reg_fields.get('last_name', '')}".strip()
+                full_name = format_patient_full_name(reg_fields.get("first_name"), reg_fields.get("last_name"))
                 resp = language_service.get_patient_identification_prompt("REGISTRATION_SUCCESS_PROMPT", current_lang, name=full_name, patient_code=next_code)
                 state_manager.save_conversation_state(conversation_code, state)
                 log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_IDENTIFICATION", state)
@@ -1262,6 +1317,307 @@ def handle_unknown_patient_identification_flow(
     }
 
 
+def build_patient_profile_response(conversation_code: str, state: dict, current_lang: str) -> dict:
+    """
+    Fetches ground truth patient record from PostgreSQL database,
+    formats clean Patient Profile Details, and returns response payload
+    with [Change Profile], [My Appointments], [My Reports], and [Main Menu] buttons.
+    """
+    pat_id = state.get("patient_id")
+    p_data = None
+    w_num = conversation_code.replace("WA_", "").split("_")[0]
+
+    conn = db_config.get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+        r = cur.fetchone()
+        if r and r[0]:
+            w_num = r[0]
+
+        if pat_id:
+            cur.execute("SELECT id, patient_code, first_name, last_name, phone, whatsapp_number, date_of_birth, gender FROM patients WHERE id = %s AND status = 'ACTIVE';", (pat_id,))
+            row = cur.fetchone()
+            if row:
+                p_data = {
+                    "id": row[0],
+                    "patient_code": row[1],
+                    "first_name": row[2],
+                    "last_name": row[3],
+                    "phone": row[4],
+                    "whatsapp_number": row[5],
+                    "date_of_birth": row[6],
+                    "gender": row[7]
+                }
+        if not p_data and w_num and w_num != "919999999999":
+            lookup = patient_id_service.identify_patient_by_phone(w_num)
+            if lookup.get("found") and lookup.get("patient"):
+                p_data = lookup["patient"]
+                state["patient_id"] = p_data["id"]
+                state["entities"]["patient_id"] = p_data["id"]
+    finally:
+        cur.close()
+        conn.close()
+
+    if p_data:
+        p_code = p_data.get("patient_code") or f"P{p_data.get('id')}"
+        full_n = format_patient_full_name(p_data.get("first_name"), p_data.get("last_name"), p_data.get("full_name"))
+        dob_str = str(p_data.get("date_of_birth")) if p_data.get("date_of_birth") else "Not recorded"
+        g_str = p_data.get("gender") or "Not recorded"
+        ph_str = p_data.get("phone") or p_data.get("whatsapp_number") or w_num
+
+        resp = (
+            f"👤 *Patient Profile Details*\n\n"
+            f"• *Name:* {full_n}\n"
+            f"• *Patient ID:* `{p_code}`\n"
+            f"• *Phone:* {ph_str}\n"
+            f"• *DOB:* {dob_str}\n"
+            f"• *Gender:* {g_str}"
+        )
+    else:
+        resp = "No patient profile was found linked to your session."
+
+    state["interactive_buttons"] = [
+        language_service.get_translated_button("btn_change_profile", current_lang),
+        language_service.get_translated_button("btn_my_appts", current_lang),
+        language_service.get_translated_button("btn_my_reports", current_lang),
+        language_service.get_translated_button("btn_main_menu", current_lang)
+    ]
+    state["intent"] = "PATIENT_PROFILE"
+    state_manager.save_conversation_state(conversation_code, state)
+    log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_PROFILE", state)
+    return {
+        "success": True,
+        "conversation_id": conversation_code,
+        "language": current_lang,
+        "intent": "PATIENT_PROFILE",
+        "response": resp,
+        "interactive_buttons": state["interactive_buttons"]
+    }
+
+
+def handle_profile_update_flow(conversation_code: str, state: dict, message_text: str, current_lang: str, btn_id: str = None) -> dict:
+    """
+    Handles targeted field updates for an existing patient profile (Name, DOB, Gender, Phone).
+    Updates ONLY the selected field in PostgreSQL, re-reads updated ground truth, and displays refreshed profile.
+    """
+    msg_raw = (message_text or "").strip()
+    msg_lwr = msg_raw.lower()
+
+    if btn_id in ("btn_back_profile", "btn_view_profile") or msg_lwr in ["back", "cancel", "back to profile", "main menu"]:
+        state["profile_update_stage"] = None
+        state["profile_update_field"] = None
+        return build_patient_profile_response(conversation_code, state, current_lang)
+
+    field = state.get("profile_update_field")
+    pat_id = state.get("patient_id")
+
+    if not pat_id:
+        w_num = conversation_code.replace("WA_", "").split("_")[0]
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT patient_id, whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+            r = cur.fetchone()
+            if r:
+                if r[0]:
+                    pat_id = r[0]
+                elif r[1] and r[1] != "919999999999":
+                    w_num = r[1]
+        finally:
+            cur.close()
+            conn.close()
+
+        if not pat_id and w_num and w_num != "919999999999":
+            lookup = patient_id_service.identify_patient_by_phone(w_num)
+            if lookup.get("found") and lookup.get("patient"):
+                pat_id = lookup["patient"]["id"]
+                state["patient_id"] = pat_id
+                state["entities"]["patient_id"] = pat_id
+
+    if not pat_id:
+        state["profile_update_stage"] = None
+        state["profile_update_field"] = None
+        resp_err = "No active patient profile was found to update."
+        return {
+            "success": False,
+            "conversation_id": conversation_code,
+            "language": current_lang,
+            "intent": "PATIENT_PROFILE",
+            "response": resp_err,
+            "interactive_buttons": [language_service.get_translated_button("btn_main_menu", current_lang)]
+        }
+
+    # 1. Update Name ONLY
+    if field == "NAME":
+        if not msg_raw or not entity_extractor.is_valid_person_name(msg_raw):
+            resp = "Please enter your updated full name."
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "PATIENT_PROFILE",
+                "response": resp,
+                "interactive_buttons": [language_service.get_translated_button("btn_back_profile", current_lang)]
+            }
+        n_parts = msg_raw.split(None, 1)
+        first_name = n_parts[0].capitalize()
+        last_name = n_parts[1].title() if len(n_parts) > 1 else "."
+
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE patients SET first_name = %s, last_name = %s, updated_at = NOW() WHERE id = %s;", (first_name, last_name, pat_id))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        log_agent_action(conversation_code, "PATIENT_PROFILE_NAME_UPDATED", {"patient_id": pat_id, "first_name": first_name, "last_name": last_name})
+
+        state["profile_update_stage"] = None
+        state["profile_update_field"] = None
+
+        full_name_clean = format_patient_full_name(first_name, last_name)
+        confirm_msg = f"Your name has been updated successfully to {full_name_clean}.\n\n"
+
+        res_profile = build_patient_profile_response(conversation_code, state, current_lang)
+        res_profile["response"] = confirm_msg + res_profile["response"]
+        return res_profile
+
+    # 2. Update Date of Birth ONLY
+    elif field == "DOB":
+        dob_extracted = date_normalizer.parse_and_normalize_date(msg_raw)[0]
+        if not dob_extracted:
+            is_v, norm_d, _ = date_normalizer.validate_dob(msg_raw, allow_ambiguous=True)
+            if is_v:
+                dob_extracted = norm_d
+        if not dob_extracted:
+            resp = "Please enter a valid date of birth (e.g. DD/MM/YYYY or YYYY-MM-DD):"
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "PATIENT_PROFILE",
+                "response": resp,
+                "interactive_buttons": [language_service.get_translated_button("btn_back_profile", current_lang)]
+            }
+
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE patients SET date_of_birth = %s, updated_at = NOW() WHERE id = %s;", (dob_extracted, pat_id))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        log_agent_action(conversation_code, "PATIENT_PROFILE_DOB_UPDATED", {"patient_id": pat_id, "date_of_birth": dob_extracted})
+
+        state["profile_update_stage"] = None
+        state["profile_update_field"] = None
+
+        confirm_msg = "Your date of birth has been updated successfully.\n\n"
+        res_profile = build_patient_profile_response(conversation_code, state, current_lang)
+        res_profile["response"] = confirm_msg + res_profile["response"]
+        return res_profile
+
+    # 3. Update Gender ONLY
+    elif field == "GENDER":
+        g_val = None
+        if btn_id == "btn_g_male" or msg_lwr in ["male", "man", "boy", "ஆண்", "पुरुष", "పురుషుడు", "പുരുഷൻ", "ಪುರುಷ", "مرد"]:
+            g_val = "Male"
+        elif btn_id == "btn_g_female" or msg_lwr in ["female", "woman", "girl", "பெண்", "महिला", "స్త్రీ", "സ്ത്രീ", "ಮಹಿಳೆ", "عورت"]:
+            g_val = "Female"
+        elif btn_id == "btn_g_other" or msg_lwr in ["other", "transgender", "மற்றவை", "अन्य", "ఇతర", "മറ്റുള്ളവ", "دیگر"]:
+            g_val = "Other"
+
+        if not g_val:
+            resp = "Please select your gender:"
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "PATIENT_PROFILE",
+                "response": resp,
+                "interactive_buttons": [
+                    language_service.get_translated_button("btn_g_male", current_lang),
+                    language_service.get_translated_button("btn_g_female", current_lang),
+                    language_service.get_translated_button("btn_g_other", current_lang),
+                    language_service.get_translated_button("btn_back_profile", current_lang)
+                ]
+            }
+
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE patients SET gender = %s, updated_at = NOW() WHERE id = %s;", (g_val, pat_id))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        log_agent_action(conversation_code, "PATIENT_PROFILE_GENDER_UPDATED", {"patient_id": pat_id, "gender": g_val})
+
+        state["profile_update_stage"] = None
+        state["profile_update_field"] = None
+
+        confirm_msg = "Your gender has been updated successfully.\n\n"
+        res_profile = build_patient_profile_response(conversation_code, state, current_lang)
+        res_profile["response"] = confirm_msg + res_profile["response"]
+        return res_profile
+
+    # 4. Update Phone Number ONLY
+    elif field == "PHONE":
+        norm_phone = normalize_phone(msg_raw)
+        if not norm_phone or len(norm_phone) < 10:
+            resp = "Please enter a valid 10-digit phone number:"
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "PATIENT_PROFILE",
+                "response": resp,
+                "interactive_buttons": [language_service.get_translated_button("btn_back_profile", current_lang)]
+            }
+
+        dup_lookup = patient_id_service.identify_patient_by_phone(norm_phone)
+        if dup_lookup.get("found") and dup_lookup.get("patient") and dup_lookup["patient"]["id"] != pat_id:
+            resp_err = "This phone number is already registered to another patient profile."
+            return {
+                "success": False,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "PATIENT_PROFILE",
+                "response": resp_err,
+                "interactive_buttons": [language_service.get_translated_button("btn_back_profile", current_lang)]
+            }
+
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE patients SET phone = %s, whatsapp_number = %s, updated_at = NOW() WHERE id = %s;", (norm_phone, norm_phone, pat_id))
+            cur.execute("UPDATE conversations SET whatsapp_number = %s WHERE conversation_code = %s;", (norm_phone, conversation_code))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        log_agent_action(conversation_code, "PATIENT_PROFILE_PHONE_UPDATED", {"patient_id": pat_id, "phone": norm_phone})
+
+        state["profile_update_stage"] = None
+        state["profile_update_field"] = None
+
+        confirm_msg = "Your phone number has been updated successfully.\n\n"
+        res_profile = build_patient_profile_response(conversation_code, state, current_lang)
+        res_profile["response"] = confirm_msg + res_profile["response"]
+        return res_profile
+
+    state["profile_update_stage"] = None
+    state["profile_update_field"] = None
+    return build_patient_profile_response(conversation_code, state, current_lang)
+
+
 def process_agent_message(conversation_code: str, patient_code: str, message_text: str, language_override: str = None, interactive_id: str = None) -> dict:
     """
     Core NLP Orchestration:
@@ -1309,7 +1665,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             btn_id = "btn_pay_change"
         elif m_strip in ["cancel payment"]:
             btn_id = "btn_pay_cancel"
-        elif m_strip.startswith("pay ₹") or m_strip == "pay":
+        elif m_strip.startswith("pay ₹") or m_strip.startswith("pay rs") or m_strip.startswith("btn_pay_exec") or m_strip in ["pay", "pay now", "make payment", "pay fee", "confirm payment", "pay ₹800", "pay 800", "pay rs 800"]:
             btn_id = "btn_pay_exec"
         elif m_strip in ["book appointment"]:
             btn_id = "btn_book_appt"
@@ -1343,6 +1699,18 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             # Pass structured IDs through unchanged
             btn_id = m_strip
         # Change-details field picker buttons
+        elif m_strip in ["change profile", "update profile", "edit profile", "btn_change_profile"]:
+            btn_id = "btn_change_profile"
+        elif m_strip in ["change name", "update name", "change my name", "update my name", "edit name", "change patient name", "btn_update_name"]:
+            btn_id = "btn_update_name"
+        elif m_strip in ["change date of birth", "change dob", "update dob", "change my dob", "update my dob", "change my date of birth", "update my date of birth", "btn_update_dob"]:
+            btn_id = "btn_update_dob"
+        elif m_strip in ["change gender", "update gender", "change my gender", "update my gender", "btn_update_gender"]:
+            btn_id = "btn_update_gender"
+        elif m_strip in ["change phone number", "change phone", "update phone", "change my phone", "update my phone", "change mobile", "update mobile", "btn_update_phone"]:
+            btn_id = "btn_update_phone"
+        elif m_strip in ["back to profile", "btn_back_profile", "back"]:
+            btn_id = "btn_back_profile"
         elif m_strip in ["change patient name", "btn_chg_name"]:
             btn_id = "btn_chg_name"
         elif m_strip in ["change date", "btn_chg_date"]:
@@ -1373,6 +1741,72 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         current_lang = state.get("language", "ENGLISH")
     state["language"] = current_lang
 
+    # Active profile field update gate
+    if state.get("profile_update_stage") == "AWAITING_NEW_VALUE":
+        return handle_profile_update_flow(conversation_code, state, message_text, current_lang, btn_id)
+    elif state.get("profile_update_stage") == "SELECT_FIELD" and not btn_id:
+        m_check = (message_text or "").lower().strip()
+        if "name" in m_check:
+            btn_id = "btn_update_name"
+        elif any(w in m_check for w in ["dob", "birth", "date"]):
+            btn_id = "btn_update_dob"
+        elif "gender" in m_check:
+            btn_id = "btn_update_gender"
+        elif any(w in m_check for w in ["phone", "mobile", "number"]):
+            btn_id = "btn_update_phone"
+        elif any(w in m_check for w in ["back", "cancel", "profile"]):
+            btn_id = "btn_back_profile"
+
+    # Restore patient_id for existing registered patients from DB / phone lookup if missing in state
+    if not state.get("patient_id"):
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        wa_phone_lookup = None
+        try:
+            cur.execute("SELECT patient_id, whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+            c_row = cur.fetchone()
+            if c_row:
+                if c_row[0]:
+                    state["patient_id"] = c_row[0]
+                    state["entities"]["patient_id"] = c_row[0]
+                    state["patient_identification_stage"] = "COMPLETED"
+                elif c_row[1] and c_row[1] != "919999999999":
+                    wa_phone_lookup = c_row[1]
+        except Exception:
+            if conn:
+                conn.rollback()
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+
+        if not wa_phone_lookup and conversation_code and conversation_code.startswith("WA_"):
+            parts = conversation_code.split("_")
+            if len(parts) >= 2 and parts[1].isdigit() and parts[1] != "919999999999":
+                wa_phone_lookup = parts[1]
+
+        if not state.get("patient_id") and wa_phone_lookup:
+            lookup = patient_id_service.identify_patient_by_phone(wa_phone_lookup)
+            if lookup.get("found") and lookup.get("patient"):
+                p_id = lookup["patient"]["id"]
+                state["patient_id"] = p_id
+                state["entities"]["patient_id"] = p_id
+                state["patient_identification_stage"] = "COMPLETED"
+                conn = db_config.get_db_connection()
+                cur = conn.cursor()
+                try:
+                    cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (p_id, conversation_code))
+                    conn.commit()
+                except Exception:
+                    if conn:
+                        conn.rollback()
+                finally:
+                    if cur:
+                        cur.close()
+                    if conn:
+                        conn.close()
+
     # Check if patient_code parameter was provided explicitly
     if patient_code and not state.get("patient_id"):
         conn = db_config.get_db_connection()
@@ -1383,6 +1817,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             if p_row:
                 state["patient_id"] = p_row[0]
                 state["entities"]["patient_id"] = p_row[0]
+                state["patient_identification_stage"] = "COMPLETED"
         except Exception:
             pass
         finally:
@@ -1926,50 +2361,22 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 "interactive_buttons": state["interactive_buttons"]
             }
 
-        elif btn_id == "btn_my_profile":
-            pat_id = state.get("dependent_patient_id") or state.get("patient_id") or state.get("primary_patient_id")
-            conn = db_config.get_db_connection()
-            cur = conn.cursor()
-            p_data = None
-            try:
-                if pat_id:
-                    cur.execute("SELECT patient_code, first_name, last_name, phone, date_of_birth, gender FROM patients WHERE id = %s;", (pat_id,))
-                    p_data = cur.fetchone()
-                if not p_data:
-                    cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
-                    w_row = cur.fetchone()
-                    if w_row and w_row[0]:
-                        cond = get_phone_query_condition()
-                        params = get_phone_query_params(w_row[0])
-                        cur.execute(f"SELECT patient_code, first_name, last_name, phone, date_of_birth, gender FROM patients WHERE {cond} LIMIT 1;", params)
-                        p_data = cur.fetchone()
-                if not p_data:
-                    cur.execute("SELECT patient_code, first_name, last_name, phone, date_of_birth, gender FROM patients ORDER BY id ASC LIMIT 1;")
-                    p_data = cur.fetchone()
-            finally:
-                cur.close()
-                conn.close()
+        elif btn_id in ("btn_my_profile", "btn_view_profile"):
+            state["profile_update_field"] = None
+            state["profile_update_stage"] = None
+            return build_patient_profile_response(conversation_code, state, current_lang)
 
-            if p_data:
-                p_code, fn, ln, ph, dob, g = p_data
-                full_n = f"{fn} {ln or ''}".strip()
-                dob_str = str(dob) if dob else "N/A"
-                resp = (
-                    f"👤 *Patient Profile Details*\n\n"
-                    f"• *Name:* {full_n}\n"
-                    f"• *Patient ID:* {p_code}\n"
-                    f"• *Phone:* {ph or 'N/A'}\n"
-                    f"• *DOB:* {dob_str}\n"
-                    f"• *Gender:* {g or 'N/A'}"
-                )
-            else:
-                resp = "No patient profile was found linked to your session."
-
-            state["interactive_buttons"] = [
-                language_service.get_translated_button("btn_my_appts", current_lang),
-                language_service.get_translated_button("btn_my_reports", current_lang),
-                language_service.get_translated_button("btn_main_menu", current_lang)
+        elif btn_id == "btn_change_profile":
+            resp = "What would you like to update?"
+            chg_buttons = [
+                language_service.get_translated_button("btn_update_name", current_lang),
+                language_service.get_translated_button("btn_update_dob", current_lang),
+                language_service.get_translated_button("btn_update_gender", current_lang),
+                language_service.get_translated_button("btn_update_phone", current_lang),
+                language_service.get_translated_button("btn_back_profile", current_lang)
             ]
+            state["profile_update_stage"] = "SELECT_FIELD"
+            state["interactive_buttons"] = chg_buttons
             state["intent"] = "PATIENT_PROFILE"
             state_manager.save_conversation_state(conversation_code, state)
             log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_PROFILE", state)
@@ -1977,8 +2384,82 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 "response": resp,
                 "intent": "PATIENT_PROFILE",
                 "language": current_lang,
-                "interactive_buttons": state["interactive_buttons"]
+                "interactive_buttons": chg_buttons
             }
+
+        elif btn_id == "btn_update_name":
+            state["profile_update_field"] = "NAME"
+            state["profile_update_stage"] = "AWAITING_NEW_VALUE"
+            state["intent"] = "PATIENT_PROFILE"
+            resp = "Please enter your updated full name."
+            chg_buttons = [language_service.get_translated_button("btn_back_profile", current_lang)]
+            state["interactive_buttons"] = chg_buttons
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_PROFILE", state)
+            return {
+                "response": resp,
+                "intent": "PATIENT_PROFILE",
+                "language": current_lang,
+                "interactive_buttons": chg_buttons
+            }
+
+        elif btn_id == "btn_update_dob":
+            state["profile_update_field"] = "DOB"
+            state["profile_update_stage"] = "AWAITING_NEW_VALUE"
+            state["intent"] = "PATIENT_PROFILE"
+            resp = "Please enter your updated date of birth (e.g. DD/MM/YYYY or YYYY-MM-DD):"
+            chg_buttons = [language_service.get_translated_button("btn_back_profile", current_lang)]
+            state["interactive_buttons"] = chg_buttons
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_PROFILE", state)
+            return {
+                "response": resp,
+                "intent": "PATIENT_PROFILE",
+                "language": current_lang,
+                "interactive_buttons": chg_buttons
+            }
+
+        elif btn_id == "btn_update_gender":
+            state["profile_update_field"] = "GENDER"
+            state["profile_update_stage"] = "AWAITING_NEW_VALUE"
+            state["intent"] = "PATIENT_PROFILE"
+            resp = "Please select your gender:"
+            chg_buttons = [
+                language_service.get_translated_button("btn_g_male", current_lang),
+                language_service.get_translated_button("btn_g_female", current_lang),
+                language_service.get_translated_button("btn_g_other", current_lang),
+                language_service.get_translated_button("btn_back_profile", current_lang)
+            ]
+            state["interactive_buttons"] = chg_buttons
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_PROFILE", state)
+            return {
+                "response": resp,
+                "intent": "PATIENT_PROFILE",
+                "language": current_lang,
+                "interactive_buttons": chg_buttons
+            }
+
+        elif btn_id == "btn_update_phone":
+            state["profile_update_field"] = "PHONE"
+            state["profile_update_stage"] = "AWAITING_NEW_VALUE"
+            state["intent"] = "PATIENT_PROFILE"
+            resp = "Please enter your updated 10-digit phone number:"
+            chg_buttons = [language_service.get_translated_button("btn_back_profile", current_lang)]
+            state["interactive_buttons"] = chg_buttons
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_PROFILE", state)
+            return {
+                "response": resp,
+                "intent": "PATIENT_PROFILE",
+                "language": current_lang,
+                "interactive_buttons": chg_buttons
+            }
+
+        elif btn_id in ("btn_back_profile",):
+            state["profile_update_field"] = None
+            state["profile_update_stage"] = None
+            return build_patient_profile_response(conversation_code, state, current_lang)
 
         elif btn_id == "btn_talk_staff_exec":
             state["escalated"] = True
@@ -2420,6 +2901,29 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
             # Execute appointment booking transaction
             pat_id = state.get("patient_id")
+            if not pat_id:
+                w_num = conversation_code.replace("WA_", "").split("_")[0]
+                conn = db_config.get_db_connection()
+                cur = conn.cursor()
+                try:
+                    cur.execute("SELECT patient_id, whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+                    c_row = cur.fetchone()
+                    if c_row:
+                        if c_row[0]:
+                            pat_id = c_row[0]
+                        elif c_row[1] and c_row[1] != "919999999999":
+                            w_num = c_row[1]
+                finally:
+                    cur.close()
+                    conn.close()
+
+                if not pat_id and w_num and w_num != "919999999999":
+                    lookup = patient_id_service.identify_patient_by_phone(w_num)
+                    if lookup.get("found") and lookup.get("patient"):
+                        pat_id = lookup["patient"]["id"]
+                        state["patient_id"] = pat_id
+                        state.setdefault("entities", {})["patient_id"] = pat_id
+
             dept_id = state["entities"].get("department_id")
             if doc_id and not dept_id:
                 conn = db_config.get_db_connection()
@@ -2434,8 +2938,25 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                     cur.close()
                     conn.close()
 
-            appt_date = state["entities"]["appointment_date"]
-            appt_time = state["entities"]["appointment_time"]
+            appt_date = state["entities"].get("appointment_date")
+            raw_time = state["entities"].get("appointment_time") or "10:00"
+            
+            # Normalize time string to 24-hour HH:MM format (e.g. "10:30 AM" -> "10:30")
+            appt_time = str(raw_time).strip()
+            if "AM" in appt_time.upper() or "PM" in appt_time.upper():
+                try:
+                    t_obj = datetime.datetime.strptime(appt_time, "%I:%M %p").time()
+                    appt_time = t_obj.strftime("%H:%M")
+                except Exception:
+                    try:
+                        t_obj = datetime.datetime.strptime(appt_time, "%I:%M%p").time()
+                        appt_time = t_obj.strftime("%H:%M")
+                    except Exception:
+                        pass
+            elif len(appt_time) == 8 and appt_time.count(":") == 2:
+                appt_time = appt_time[:5]
+            state["entities"]["appointment_time"] = appt_time
+
             reason = state["entities"].get("reason") or "General Consultation"
 
             app_for = state["entities"].get("appointment_for")
@@ -2462,6 +2983,24 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 reason=reason,
                 user_id=None
             )
+
+            # If slot unavailable because it was already booked by same session/patient, recover booking_id
+            if not res.get("success") and booking_pat_id and doc_id and appt_date:
+                conn = db_config.get_db_connection()
+                cur = conn.cursor()
+                try:
+                    cur.execute("""
+                        SELECT booking_id FROM appointments 
+                        WHERE patient_id = %s AND doctor_id = %s AND appointment_date = %s 
+                          AND status NOT IN ('CANCELLED', 'RESCHEDULED')
+                        ORDER BY id DESC LIMIT 1;
+                    """, (booking_pat_id, doc_id, appt_date))
+                    b_row = cur.fetchone()
+                    if b_row:
+                        res = {"success": True, "data": {"booking_id": b_row[0]}}
+                finally:
+                    cur.close()
+                    conn.close()
 
             if res.get("success"):
                 booking_id = (res.get("data") or {}).get("booking_id") or res.get("booking_id")
@@ -3399,7 +3938,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         "PATIENT_REGISTRATION":  "REGISTER_PATIENT",
         "DEPENDENT_BOOKING":     "BOOK_APPOINTMENT",   # handled via sub-flow
         "APPOINTMENT_CONFIRMATION": "BOOK_APPOINTMENT",
-        "PATIENT_DETAILS_UPDATE": "REGISTER_PATIENT",
+        "PATIENT_DETAILS_UPDATE": "PATIENT_PROFILE",
         "DOCTOR_AVAILABILITY":   "DOCTOR_AVAILABILITY",
     }
     llm_intent_name = llm_route.get("intent", "UNKNOWN")
@@ -4428,8 +4967,11 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             "first_name": None, "last_name": None, "date_of_birth": None, "gender": None, "phone": None, "reason_for_visit": None
         }
 
-        # 0. Check if user typed an edit/change request or tapped Edit button
-        is_edit_request = any(re.search(rf"\b{w}\b", msg_raw.lower()) for w in ["edit", "change", "modify", "reset", "start over", "btn_edit_reg"]) or (msg_raw.lower() in ["no", "n"] and state.get("reg_confirmation_pending"))
+        # 0. Check if user typed an edit/change request or tapped Edit button during registration
+        is_edit_request = (state.get("patient_identification_stage") == "REGISTRATION") and (
+            any(re.search(rf"\b{w}\b", msg_raw.lower()) for w in ["edit", "modify", "reset", "start over", "btn_edit_reg"]) or
+            (msg_raw.lower() in ["no", "n"] and state.get("reg_confirmation_pending"))
+        )
         if is_edit_request:
             state["reg_confirmation_pending"] = False
             state["registration_fields"] = { "first_name": None, "last_name": None, "date_of_birth": None, "gender": None, "phone": None, "reason_for_visit": None }
@@ -4489,12 +5031,9 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                     state["registration_fields"] = { "first_name": None, "last_name": None, "date_of_birth": None, "gender": None, "phone": None, "reason_for_visit": None }
 
                     log_agent_action(conversation_code, "PATIENT_REGISTERED", {"patient_id": new_pat_id, "patient_code": next_code})
-                    response_text = f"Your patient profile has been created successfully. ✅ (Patient Code: {next_code})\n\nHow can I help you today?"
-                    state["interactive_buttons"] = [
-                        {"id": "btn_book_appt", "title": "Book Appointment"},
-                        {"id": "btn_doctor_avail", "title": "Doctor Availability"},
-                        {"id": "btn_hosp_info", "title": "Hospital Information"}
-                    ]
+                    full_name = format_patient_full_name(reg_fields.get("first_name"), reg_fields.get("last_name"))
+                    response_text = f"Thank you, {full_name}. Your registration with Meridian Hospital is complete. Patient ID: {next_code}\n\nHow can I help you today?"
+                    state["interactive_buttons"] = language_service.get_main_menu_buttons(current_lang)
                 except Exception as e:
                     conn.rollback()
                     response_text = f"Registration failed: {str(e)}"
@@ -4545,23 +5084,23 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             raw_n = p_name_is.group(1).strip()
             n_parts = raw_n.split(None, 1)
             reg_fields["first_name"] = n_parts[0].capitalize()
-            reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+            reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else None
         elif p_is_name and entity_extractor.is_valid_person_name(p_is_name.group(1).strip()):
             raw_n = p_is_name.group(1).strip()
             n_parts = raw_n.split(None, 1)
             reg_fields["first_name"] = n_parts[0].capitalize()
-            reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+            reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else None
         elif not existing_fn or not entity_extractor.is_valid_person_name(existing_fn):
             extracted_fn = llm_info.get("first_name")
             if extracted_fn and entity_extractor.is_valid_person_name(extracted_fn):
                 reg_fields["first_name"] = extracted_fn
-                reg_fields["last_name"] = llm_info.get("last_name") or reg_fields.get("last_name") or "."
+                reg_fields["last_name"] = llm_info.get("last_name") or reg_fields.get("last_name")
             elif len(parts) >= 1:
                 first_part = parts[0]
                 if entity_extractor.is_valid_person_name(first_part):
                     n_parts = first_part.split(None, 1)
                     reg_fields["first_name"] = n_parts[0].capitalize()
-                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else None
 
         # 2. Phone Extraction & Sender Number Fallback
         if not reg_fields.get("phone"):
@@ -5155,24 +5694,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
 
         # Self profile details
         else:
-            response_text = patient_id_service.format_patient_details_response(p_dict or state.get("patient_info"), w_num, current_lang)
-            state["interactive_buttons"] = [
-                {"id": "btn_book_appt", "title": "Book Appointment"},
-                {"id": "btn_doctor_avail", "title": "Doctor Availability"}
-            ]
-            state_manager.save_conversation_state(conversation_code, state)
-            log_message_to_db(conversation_code, "AI_AGENT", response_text, current_lang, intent, state)
-            res_payload = {
-                "success": True,
-                "conversation_id": conversation_code,
-                "language": current_lang,
-                "intent": intent,
-                "response": response_text,
-                "missing_information": [],
-                "tool_called": "get_patient_details",
-                "interactive_buttons": state.get("interactive_buttons", [])
-            }
-            return response_validator.validate_pre_dispatch(state, res_payload)
+            return build_patient_profile_response(conversation_code, state, current_lang)
 
 
     elif intent == "CLARIFICATION_REQUIRED":

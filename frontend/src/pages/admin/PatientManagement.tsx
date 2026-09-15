@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Eye, ChevronLeft, ChevronRight, RefreshCw, MessageSquare } from 'lucide-react';
+import { Search, Filter, Eye, ChevronLeft, ChevronRight, RefreshCw, MessageSquare, UserPlus } from 'lucide-react';
 import { fetchPatients, type Patient } from '../../services/dashboardApi';
+import AddPatientModal from '../../components/AddPatientModal';
 
 const PatientManagement: React.FC = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [isAddPatientOpen, setIsAddPatientOpen] = useState(false);
   const perPage = 15;
 
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -44,9 +46,19 @@ const PatientManagement: React.FC = () => {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>Patient Management</h2>
-        <p>All registered patients — live data from hospital database</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2>Patient Management</h2>
+          <p>All registered patients — live data from hospital database</p>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => setIsAddPatientOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', fontWeight: 600 }}
+        >
+          <UserPlus size={16} />
+          + Add Patients
+        </button>
       </div>
 
       {error && (
@@ -78,6 +90,7 @@ const PatientManagement: React.FC = () => {
             </button>
           </div>
         </div>
+
 
         <div className="table-container">
           {loading ? (
@@ -161,8 +174,15 @@ const PatientManagement: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <AddPatientModal
+        isOpen={isAddPatientOpen}
+        onClose={() => setIsAddPatientOpen(false)}
+        onSuccess={() => loadPatients()}
+      />
     </div>
   );
 };
 
 export default PatientManagement;
+

@@ -449,6 +449,68 @@ def get_patients(
             conn.close()
 
 
+class AddPatientWhatsAppRequest(BaseModel):
+    whatsapp_number: str
+
+
+@router.post("/patients/add-whatsapp")
+def add_patient_whatsapp(
+    req: AddPatientWhatsAppRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin action to initiate WhatsApp Patient Desk conversation for a patient phone number.
+    Validates & normalizes the number, checks if existing patient, and sends the Meridian welcome WhatsApp message.
+    """
+    import voice.whatsapp_client as whatsapp_client
+    
+    raw_number = (req.whatsapp_number or "").strip()
+    if not raw_number:
+        raise HTTPException(status_code=400, detail="Please enter a valid WhatsApp number.")
+
+    # Phone normalization using existing whatsapp_client cleaner
+    clean_num = whatsapp_client.clean_whatsapp_number(raw_number)
+    if not clean_num or len(clean_num) < 10 or len(clean_num) > 15:
+        raise HTTPException(status_code=400, detail="Please enter a valid WhatsApp number.")
+
+    # Check if patient exists in database using existing patient lookup logic
+    conn = get_conn()
+    cur = conn.cursor()
+    patient_name = None
+    is_existing = False
+    try:
+        cur.execute("""
+            SELECT id, first_name, last_name, patient_code FROM patients 
+            WHERE (phone LIKE %s OR whatsapp_number LIKE %s) AND status = 'ACTIVE'
+            LIMIT 1;
+        """, (f"%{clean_num[-10:]}%", f"%{clean_num[-10:]}%"))
+        row = cur.fetchone()
+        if row:
+            is_existing = True
+            patient_name = f"{row[1]} {row[2] or ''}".strip()
+    except Exception as e:
+        print(f"[WARN] Patient lookup during add-whatsapp: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+    # Send Meridian Hospital welcome WhatsApp message (reusing active template meridian_patient_welcome)
+    send_res = whatsapp_client.send_welcome_message(clean_num)
+    
+    formatted_display = f"+{clean_num}" if not clean_num.startswith("+") else clean_num
+    if len(clean_num) == 12 and clean_num.startswith("91"):
+        formatted_display = f"+91 {clean_num[2:7]} {clean_num[7:]}"
+
+    return {
+        "success": True,
+        "message": f"Welcome message successfully sent to {formatted_display}.",
+        "whatsapp_number": formatted_display,
+        "is_existing": is_existing,
+        "patient_name": patient_name,
+        "send_result": send_res
+    }
+
+
 @router.get("/patients/{patient_id}")
 def get_patient_detail(patient_id: int, current_user: dict = Depends(get_current_user)):
     """Returns full patient details including appointment history."""
