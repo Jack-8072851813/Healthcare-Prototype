@@ -46,8 +46,10 @@ import voice.whatsapp_client as whatsapp_client
 
 # Module-level aggregator singleton — 3 s debounce window
 _aggregator = message_aggregator.get_aggregator(window_seconds=1.5)
+_processed_test_wamids = set()
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp Webhook"])
+
 
 VERIFY_TOKEN = os.getenv("META_WHATSAPP_VERIFY_TOKEN", os.getenv("WHATSAPP_VERIFY_TOKEN", "meridian_hospital_token"))
 META_APP_SECRET = os.getenv("META_APP_SECRET")
@@ -239,6 +241,7 @@ _aggregator.set_flush_callback(_global_whatsapp_flush_callback)
 
 def process_voice_reply(session_id: str, from_number: str, msg_id: str, audio_data: dict):
     media_id = audio_data.get("id")
+    temp_audio_path = None
     print(f"[VOICE_MESSAGE_RECEIVED] wamid={msg_id}, media_id={media_id}, from={from_number}")
     whatsapp_client.mark_message_read(msg_id)
     whatsapp_client.send_typing_indicator(from_number)
@@ -251,7 +254,7 @@ def process_voice_reply(session_id: str, from_number: str, msg_id: str, audio_da
         ]
         whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
         record_whatsapp_message_id(session_id, msg_id)
-        return
+        return {"status": "error", "detail": "Missing voice media id"}
 
     # Download audio from Meta
     temp_audio_path = whatsapp_client.download_media(media_id)
@@ -264,7 +267,7 @@ def process_voice_reply(session_id: str, from_number: str, msg_id: str, audio_da
         ]
         whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
         record_whatsapp_message_id(session_id, msg_id)
-        return
+        return {"status": "error", "detail": "Media download failed"}
 
     try:
         print(f"[VOICE_TRANSCRIPTION_STARTED] media_id={media_id}")
@@ -284,7 +287,7 @@ def process_voice_reply(session_id: str, from_number: str, msg_id: str, audio_da
             ]
             whatsapp_client.send_button_message(from_number, err_msg, action_buttons)
             record_whatsapp_message_id(session_id, msg_id)
-            return
+            return {"status": "error", "detail": "STT transcription failed"}
 
         print(f"[VOICE_TRANSCRIPTION_COMPLETED] transcript='{transcript}', lang={detected_lang}")
 
@@ -334,8 +337,17 @@ def process_voice_reply(session_id: str, from_number: str, msg_id: str, audio_da
             whatsapp_client.send_audio_message(from_number, tts_res["audio_data"])
 
         record_whatsapp_message_id(session_id, msg_id)
+        return {
+            "status": "success",
+            "message_id": msg_id,
+            "session_id": session_id,
+            "transcript": transcript,
+            "intent": agent_res.get("intent"),
+            "language": final_lang,
+            "response": response_text
+        }
     finally:
-        if os.path.exists(temp_audio_path):
+        if temp_audio_path and os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
             except Exception:
@@ -462,7 +474,9 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 cur.close()
                 conn.close()
 
+
         return {"status": "ok", "detail": f"Status update processed ({status_upper})"}
+
 
     if not messages:
         return {"status": "ok", "detail": "No messages or statuses in change value"}
@@ -535,12 +549,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         # 2. Voice/Audio Message flow
         elif msg_type == "audio":
             audio_data = message_data.get("audio", {})
-            background_tasks.add_task(process_voice_reply, session_id, from_number, msg_id, audio_data)
-            return {
-                "status": "success",
-                "message_id": msg_id,
-                "session_id": session_id
-            }
+            return process_voice_reply(session_id, from_number, msg_id, audio_data)
 
         return {"status": "ok", "detail": f"Unsupported message type: {msg_type}"}
 

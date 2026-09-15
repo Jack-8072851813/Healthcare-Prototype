@@ -85,14 +85,6 @@ const AIPatientDesk: React.FC = () => {
             <p>AI-powered conversational assistance — live data from database</p>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button 
-              className="btn btn-primary btn-sm" 
-              onClick={() => window.open('/patient-chat', '_blank')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#075E54', borderColor: '#075E54' }}
-            >
-              <Bot size={14} />
-              Open Live WhatsApp Patient Desk
-            </button>
             <button className="btn btn-secondary btn-sm" onClick={loadData} disabled={loading}
               style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />

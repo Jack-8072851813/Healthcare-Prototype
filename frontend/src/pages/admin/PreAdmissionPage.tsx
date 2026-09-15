@@ -11,6 +11,8 @@ import {
   Plus, Search, Filter, AlertTriangle, Eye, Send, X, Clock, User, Check, ShieldAlert
 } from 'lucide-react';
 
+import { useAuth } from '../../context/AuthContext';
+
 const STATUS_OPTIONS = [
   'PENDING', 'CONTACTED', 'CONFIRMED', 'DOCUMENTS_PENDING',
   'READY', 'ESCALATED', 'COMPLETED', 'CANCELLED'
@@ -19,6 +21,7 @@ const STATUS_OPTIONS = [
 const ADMISSION_TYPES = ['INPATIENT', 'SURGERY', 'DAYCARE'];
 
 const PreAdmissionPage: React.FC = () => {
+  const { user } = useAuth();
   const [preAdmissions, setPreAdmissions] = useState<PreAdmissionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -207,6 +210,14 @@ const PreAdmissionPage: React.FC = () => {
   const escalatedCount = preAdmissions.filter(p => p.status === 'ESCALATED').length;
   const completedCount = preAdmissions.filter(p => p.status === 'COMPLETED').length;
 
+  const handleOpenAddModal = () => {
+    setShowAddModal(true);
+    const docId = user?.doctorId || (user as any)?.doctor_id;
+    if (user && (user.role === 'doctor' || (user as any)?.role === 'DOCTOR') && docId) {
+      handleDoctorSelect(String(docId));
+    }
+  };
+
   return (
     <div>
       {toast && (
@@ -222,7 +233,7 @@ const PreAdmissionPage: React.FC = () => {
         </div>
         <button
           className="btn btn-primary"
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenAddModal}
           style={{ display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <Plus size={16} /> Register Admission
@@ -345,7 +356,9 @@ const PreAdmissionPage: React.FC = () => {
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Check-in: {format12HourTime(pa.expected_checkin_time)}</div>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 500 }}>Dr. {pa.doctor_name}</div>
+                      <div style={{ fontWeight: 500 }}>
+                        {pa.doctor_name ? (pa.doctor_name.startsWith('Dr.') ? pa.doctor_name : `Dr. ${pa.doctor_name}`) : 'Unassigned'}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{pa.department_name}</div>
                     </td>
                     <td>
@@ -438,7 +451,7 @@ const PreAdmissionPage: React.FC = () => {
                     <option value="">-- Select Doctor --</option>
                     {doctors.map(d => (
                       <option key={d.id} value={d.id}>
-                        Dr. {d.display_name} ({d.specialization})
+                        {d.display_name.startsWith('Dr.') ? d.display_name : `Dr. ${d.display_name}`} ({d.specialization})
                       </option>
                     ))}
                   </select>

@@ -18,6 +18,7 @@ def get_default_state():
         "conversation_id": None,
         "patient_id": None,
         "patient_type": None,
+        "patient_identification_stage": None,
         "language": "ENGLISH",
         "intent": "GREETING",
         "conversation_state": "GREETING",

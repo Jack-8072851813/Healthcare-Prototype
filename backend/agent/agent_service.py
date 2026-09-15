@@ -3,6 +3,7 @@ import os
 import datetime
 import random
 import re
+from typing import Optional, Dict, Any, List
 
 # Add backend directory to sys.path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -835,6 +836,432 @@ def format_doctor_availability_response(department_id: int, date_str: str, conve
     return "\n".join(lines)
 
 
+def extract_patient_id_from_text(text: str) -> Optional[str]:
+    """Helper to extract a Patient ID like P1001, P9989, PAT1234, or numeric ID from text."""
+    if not text:
+        return None
+    clean = text.strip()
+    match = re.search(r"\b(P\d{3,6}|PAT\d{4,6}|\d{3,6})\b", clean, re.IGNORECASE)
+    if match:
+        val = match.group(1).upper()
+        if val.isdigit():
+            val = f"P{val}"
+        return val
+    return None
+
+
+def handle_unknown_patient_identification_flow(
+    conversation_code: str,
+    state: dict,
+    message_text: str,
+    current_lang: str,
+    btn_id: Optional[str] = None
+) -> dict:
+    """
+    Handles patient identification gate & flow for unknown/new WhatsApp numbers.
+    Stages:
+      - AWAITING_PATIENT_TYPE: Ask 'First-time Visitor' vs 'Existing Patient'
+      - AWAITING_PATIENT_ID: Prompt for Patient ID, validate against DB, link WhatsApp number, show confirmation + Main Menu
+      - REGISTRATION: Collect registration fields (name, dob, gender, auto-retrieved phone), duplicate check, create patient, show confirmation + Main Menu
+    """
+    whatsapp_val = "919999999999"
+    conn = db_config.get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT whatsapp_number FROM conversations WHERE conversation_code = %s;", (conversation_code,))
+        w_row = cur.fetchone()
+        if w_row and w_row[0]:
+            whatsapp_val = w_row[0]
+    except Exception:
+        pass
+    finally:
+        cur.close()
+        conn.close()
+
+    if whatsapp_val == "919999999999" and conversation_code and conversation_code.startswith("WA_"):
+        parts = conversation_code.split("_")
+        if len(parts) >= 2 and parts[1].isdigit():
+            whatsapp_val = parts[1]
+
+    stage = state.get("patient_identification_stage")
+    msg_raw = (message_text or "").strip()
+
+    main_menu_buttons = [
+        language_service.get_translated_button("btn_cat_doctors", current_lang),
+        language_service.get_translated_button("btn_cat_health", current_lang),
+        language_service.get_translated_button("btn_book_appt", current_lang),
+        language_service.get_translated_button("btn_doctor_avail", current_lang),
+        language_service.get_translated_button("btn_my_appts", current_lang),
+        language_service.get_translated_button("btn_hosp_info", current_lang),
+        language_service.get_translated_button("btn_patient_help", current_lang),
+        language_service.get_translated_button("btn_emergency", current_lang)
+    ]
+
+    # --- Button / Option Triggers ---
+    if btn_id in ("btn_first_time", "btn_first_time_visitor") or any(kw in msg_raw.lower() for kw in ["first-time visitor", "first time visitor", "first time", "first-time", "new patient"]):
+        stage = "REGISTRATION"
+        state["patient_identification_stage"] = "REGISTRATION"
+    elif btn_id == "btn_existing_patient" or msg_raw.lower() in ["existing patient", "existing"]:
+        stage = "AWAITING_PATIENT_ID"
+        state["patient_identification_stage"] = "AWAITING_PATIENT_ID"
+        prompt_text = language_service.get_patient_identification_prompt("ENTER_PATIENT_ID_PROMPT", current_lang)
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", prompt_text, current_lang, "PATIENT_IDENTIFICATION", state)
+        return {
+            "success": True,
+            "conversation_id": conversation_code,
+            "language": current_lang,
+            "intent": "PATIENT_IDENTIFICATION",
+            "response": prompt_text,
+            "interactive_buttons": []
+        }
+    elif btn_id == "btn_retry_patient_id":
+        stage = "AWAITING_PATIENT_ID"
+        state["patient_identification_stage"] = "AWAITING_PATIENT_ID"
+        prompt_text = language_service.get_patient_identification_prompt("ENTER_PATIENT_ID_PROMPT", current_lang)
+        state_manager.save_conversation_state(conversation_code, state)
+        log_message_to_db(conversation_code, "AI_AGENT", prompt_text, current_lang, "PATIENT_IDENTIFICATION", state)
+        return {
+            "success": True,
+            "conversation_id": conversation_code,
+            "language": current_lang,
+            "intent": "PATIENT_IDENTIFICATION",
+            "response": prompt_text,
+            "interactive_buttons": []
+        }
+
+    # If stage is AWAITING_PATIENT_ID (user entered Patient ID or selected existing patient)
+    if stage == "AWAITING_PATIENT_ID":
+        extracted_pid = extract_patient_id_from_text(msg_raw)
+        if not extracted_pid and msg_raw:
+            extracted_pid = msg_raw.upper().replace(" ", "")
+
+        if extracted_pid:
+            # Query DB for matching patient record
+            conn = db_config.get_db_connection()
+            cur = conn.cursor()
+            try:
+                numeric_part = extracted_pid.lstrip("P").lstrip("AT")
+                cur.execute("""
+                    SELECT id, patient_code, first_name, last_name, date_of_birth, gender, phone, whatsapp_number
+                    FROM patients
+                    WHERE (UPPER(patient_code) = %s OR id::text = %s OR UPPER(patient_code) = %s) AND status = 'ACTIVE'
+                    LIMIT 1;
+                """, (extracted_pid.upper(), numeric_part, f"P{numeric_part}"))
+                row = cur.fetchone()
+
+                if row:
+                    pat_id, p_code, fn, ln, dob, gen, ph, wa = row
+                    full_name = f"{fn or ''} {ln or ''}".strip() or "Patient"
+                    str_dob = str(dob) if dob else "Not recorded"
+                    str_gen = gen or "Not recorded"
+
+                    # Link WhatsApp number to patient record if not already linked
+                    if whatsapp_val and whatsapp_val != "919999999999":
+                        cur.execute("UPDATE patients SET whatsapp_number = %s WHERE id = %s;", (whatsapp_val, pat_id))
+                    cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (pat_id, conversation_code))
+                    conn.commit()
+
+                    state["patient_id"] = pat_id
+                    state["entities"]["patient_id"] = pat_id
+                    state["patient_identification_stage"] = "COMPLETED"
+                    state["interactive_buttons"] = main_menu_buttons
+
+                    resp = language_service.get_patient_identification_prompt(
+                        "PATIENT_FOUND_PROMPT",
+                        current_lang,
+                        patient_code=p_code,
+                        name=full_name,
+                        dob=str_dob,
+                        gender=str_gen
+                    )
+                    state_manager.save_conversation_state(conversation_code, state)
+                    log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_IDENTIFICATION", state)
+                    return {
+                        "success": True,
+                        "conversation_id": conversation_code,
+                        "language": current_lang,
+                        "intent": "PATIENT_IDENTIFICATION",
+                        "response": resp,
+                        "interactive_buttons": main_menu_buttons
+                    }
+                else:
+                    # Patient ID not found
+                    resp = language_service.get_patient_identification_prompt("PATIENT_ID_NOT_FOUND_PROMPT", current_lang)
+                    state["interactive_buttons"] = [
+                        language_service.get_translated_button("btn_retry_patient_id", current_lang),
+                        language_service.get_translated_button("btn_first_time", current_lang)
+                    ]
+                    state_manager.save_conversation_state(conversation_code, state)
+                    log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_IDENTIFICATION", state)
+                    return {
+                        "success": True,
+                        "conversation_id": conversation_code,
+                        "language": current_lang,
+                        "intent": "PATIENT_IDENTIFICATION",
+                        "response": resp,
+                        "interactive_buttons": state["interactive_buttons"]
+                    }
+            except Exception as e:
+                conn.rollback()
+                print(f"[PATIENT_ID_GATE] Error looking up patient ID {extracted_pid}: {e}")
+            finally:
+                cur.close()
+                conn.close()
+
+    # If stage is REGISTRATION
+    if stage == "REGISTRATION":
+        reg_fields = state.setdefault("registration_fields", {
+            "first_name": None, "last_name": None, "date_of_birth": None, "gender": None, "phone": None, "reason_for_visit": None
+        })
+
+        if not reg_fields.get("phone"):
+            reg_fields["phone"] = whatsapp_val if whatsapp_val != "919999999999" else "8072851813"
+
+        # Check gender buttons
+        if btn_id == "btn_g_male" or msg_raw.lower() in ["male", "man", "ஆண்", "पुरुष", "పురుషుడు", "പുരുഷൻ", "ಪುರುಷ", "مرد"]:
+            reg_fields["gender"] = "Male"
+        elif btn_id == "btn_g_female" or msg_raw.lower() in ["female", "woman", "பெண்", "महिला", "స్త్రీ", "സ്ത്രീ", "ಮಹಿಳೆ", "عورت"]:
+            reg_fields["gender"] = "Female"
+        elif btn_id == "btn_g_other" or msg_raw.lower() in ["other", "மற்றவை", "अन्य", "ఇతర", "മറ്റുള്ളവ", "دیگر"]:
+            reg_fields["gender"] = "Other"
+
+        # Extract structured info via LLM and entity extractor
+        if msg_raw and not btn_id:
+            llm_info = llm_service.extract_structured_info(msg_raw, state, current_lang)
+            if llm_info.get("first_name") and entity_extractor.is_valid_person_name(llm_info["first_name"]):
+                reg_fields["first_name"] = llm_info["first_name"]
+                if llm_info.get("last_name"):
+                    reg_fields["last_name"] = llm_info["last_name"]
+            if llm_info.get("gender"):
+                reg_fields["gender"] = llm_info["gender"]
+            if llm_info.get("date_of_birth"):
+                reg_fields["date_of_birth"] = llm_info["date_of_birth"]
+
+            # Fallback regex parsing for name, dob, gender
+            if not reg_fields.get("first_name"):
+                p_name_is = re.search(r"^(?:my\s+name\s+is|i\s+am|iam|name[:\s]+)\s+([a-zA-Z\s\.]+)", msg_raw, re.IGNORECASE)
+                if p_name_is and entity_extractor.is_valid_person_name(p_name_is.group(1).strip()):
+                    n_parts = p_name_is.group(1).strip().split(None, 1)
+                    reg_fields["first_name"] = n_parts[0].capitalize()
+                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+                elif entity_extractor.is_valid_person_name(msg_raw):
+                    n_parts = msg_raw.split(None, 1)
+                    reg_fields["first_name"] = n_parts[0].capitalize()
+                    reg_fields["last_name"] = n_parts[1].capitalize() if len(n_parts) > 1 else "."
+
+            if not reg_fields.get("date_of_birth"):
+                dob_extracted = date_normalizer.parse_and_normalize_date(msg_raw)[0]
+                if dob_extracted:
+                    reg_fields["date_of_birth"] = dob_extracted
+
+            if not reg_fields.get("gender"):
+                if re.search(r"\b(male|man|boy)\b", msg_raw.lower()):
+                    reg_fields["gender"] = "Male"
+                elif re.search(r"\b(female|woman|girl)\b", msg_raw.lower()):
+                    reg_fields["gender"] = "Female"
+                elif re.search(r"\b(other|transgender)\b", msg_raw.lower()):
+                    reg_fields["gender"] = "Other"
+
+        # Check missing fields
+        if not reg_fields.get("first_name"):
+            resp = "Please provide your name."
+            if current_lang == "TAMIL":
+                resp = "தயவுசெய்து உங்கள் பெயரை வழங்கவும்."
+            elif current_lang == "HINDI":
+                resp = "कृपया अपना नाम प्रदान करें।"
+            elif current_lang == "TELUGU":
+                resp = "దయచేసి మీ పేరును అందించండి."
+            elif current_lang == "MALAYALAM":
+                resp = "ദയവായി നിങ്ങളുടെ പേര് നൽകുക."
+            elif current_lang == "KANNADA":
+                resp = "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಹೆಸರನ್ನು ನೀಡಿ."
+            elif current_lang == "URDU":
+                resp = "براہ کرم اپنا نام فراہم کریں۔"
+
+            state["patient_identification_stage"] = "REGISTRATION"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "REGISTER_PATIENT", state)
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "REGISTER_PATIENT",
+                "response": resp,
+                "interactive_buttons": []
+            }
+
+        if not reg_fields.get("date_of_birth"):
+            resp = "Please provide your date of birth."
+            if current_lang == "TAMIL":
+                resp = "தயவுசெய்து உங்கள் பிறந்த தேதியை வழங்கவும்."
+            elif current_lang == "HINDI":
+                resp = "कृपया अपनी जन्म तिथि प्रदान करें।"
+            elif current_lang == "TELUGU":
+                resp = "దయచేసి మీ పుట్టిన తేదీని అందించండి."
+            elif current_lang == "MALAYALAM":
+                resp = "ദയവായി നിങ്ങളുടെ ജനനത്തീയതി നൽകുക."
+            elif current_lang == "KANNADA":
+                resp = "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಹುಟ್ಟಿದ ದಿನಾಂಕವನ್ನು ನೀಡಿ."
+            elif current_lang == "URDU":
+                resp = "براہ کرم اپنی تاریخ پیدائش فراہم کریں۔"
+
+            state["patient_identification_stage"] = "REGISTRATION"
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "REGISTER_PATIENT", state)
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "REGISTER_PATIENT",
+                "response": resp,
+                "interactive_buttons": []
+            }
+
+        if not reg_fields.get("gender"):
+            resp = "Please select your gender."
+            if current_lang == "TAMIL":
+                resp = "தயவுசெய்து உங்கள் பாலினத்தைத் தேர்ந்தெடுக்கவும்."
+            elif current_lang == "HINDI":
+                resp = "कृपया अपना लिंग चुनें।"
+            elif current_lang == "TELUGU":
+                resp = "దయచేసి మీ లింగాన్ని ఎంచుకోండి."
+            elif current_lang == "MALAYALAM":
+                resp = "ദയവായി നിങ്ങളുടെ ലിംഗഭേദം തിരഞ്ഞെടുക്കുക."
+            elif current_lang == "KANNADA":
+                resp = "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಲಿಂಗವನ್ನು ಆಯ್ಕೆಮಾಡಿ."
+            elif current_lang == "URDU":
+                resp = "براہ کرم اپنا جنس منتخب کریں۔"
+
+            state["patient_identification_stage"] = "REGISTRATION"
+            state["interactive_buttons"] = [
+                language_service.get_translated_button("btn_g_male", current_lang),
+                language_service.get_translated_button("btn_g_female", current_lang),
+                language_service.get_translated_button("btn_g_other", current_lang)
+            ]
+            state_manager.save_conversation_state(conversation_code, state)
+            log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "REGISTER_PATIENT", state)
+            return {
+                "success": True,
+                "conversation_id": conversation_code,
+                "language": current_lang,
+                "intent": "REGISTER_PATIENT",
+                "response": resp,
+                "interactive_buttons": state["interactive_buttons"]
+            }
+
+        # ALL FIELDS COLLECTED! Perform Step 5 Final Duplicate Check
+        reg_phone = reg_fields.get("phone") or whatsapp_val
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            lookup = patient_id_service.identify_patient_by_phone(reg_phone)
+            if lookup.get("found") and lookup.get("patient"):
+                p_data = lookup["patient"]
+                pat_id = p_data["id"]
+                p_code = p_data.get("patient_code") or f"P{pat_id}"
+                full_name = p_data.get("full_name") or f"{reg_fields['first_name']} {reg_fields.get('last_name', '')}".strip()
+
+                cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (pat_id, conversation_code))
+                if whatsapp_val and whatsapp_val != "919999999999":
+                    cur.execute("UPDATE patients SET whatsapp_number = %s WHERE id = %s;", (whatsapp_val, pat_id))
+                conn.commit()
+
+                state["patient_id"] = pat_id
+                state["entities"]["patient_id"] = pat_id
+                state["patient_identification_stage"] = "COMPLETED"
+                state["interactive_buttons"] = main_menu_buttons
+
+                resp = language_service.get_patient_identification_prompt("REGISTRATION_SUCCESS_PROMPT", current_lang, name=full_name, patient_code=p_code)
+                state_manager.save_conversation_state(conversation_code, state)
+                log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_IDENTIFICATION", state)
+                return {
+                    "success": True,
+                    "conversation_id": conversation_code,
+                    "language": current_lang,
+                    "intent": "PATIENT_IDENTIFICATION",
+                    "response": resp,
+                    "interactive_buttons": main_menu_buttons
+                }
+            else:
+                # Create new patient record
+                cur.execute("SELECT MAX(CAST(SUBSTRING(patient_code FROM 2) AS INTEGER)) FROM patients WHERE patient_code ~ '^P[0-9]+';")
+                row = cur.fetchone()
+                next_num = (row[0] + 1) if (row and row[0]) else 11
+                next_code = f"P{next_num:03d}"
+
+                cur.execute("""
+                    INSERT INTO patients (patient_code, first_name, last_name, date_of_birth, gender, phone, whatsapp_number, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
+                    RETURNING id;
+                """, (
+                    next_code,
+                    reg_fields["first_name"] or "Patient",
+                    reg_fields.get("last_name") or ".",
+                    reg_fields["date_of_birth"] or "2000-01-01",
+                    reg_fields["gender"] or "Male",
+                    reg_phone,
+                    whatsapp_val
+                ))
+                new_pat_id = cur.fetchone()[0]
+                cur.execute("UPDATE conversations SET patient_id = %s WHERE conversation_code = %s;", (new_pat_id, conversation_code))
+                conn.commit()
+
+                state["patient_id"] = new_pat_id
+                state["entities"]["patient_id"] = new_pat_id
+                state["patient_identification_stage"] = "COMPLETED"
+                state["interactive_buttons"] = main_menu_buttons
+
+                full_name = f"{reg_fields['first_name']} {reg_fields.get('last_name', '')}".strip()
+                resp = language_service.get_patient_identification_prompt("REGISTRATION_SUCCESS_PROMPT", current_lang, name=full_name, patient_code=next_code)
+                state_manager.save_conversation_state(conversation_code, state)
+                log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "PATIENT_IDENTIFICATION", state)
+                return {
+                    "success": True,
+                    "conversation_id": conversation_code,
+                    "language": current_lang,
+                    "intent": "PATIENT_IDENTIFICATION",
+                    "response": resp,
+                    "interactive_buttons": main_menu_buttons
+                }
+        except Exception as e:
+            conn.rollback()
+            print(f"[PATIENT_ID_GATE] Error registering new patient: {e}")
+        finally:
+            cur.close()
+            conn.close()
+
+    # Default / Initial Unknown Patient Gate Prompt (stage is None or AWAITING_PATIENT_TYPE)
+    # Check if message text already contains Patient ID
+    extracted_pid = extract_patient_id_from_text(msg_raw)
+    if extracted_pid and not any(kw in msg_raw.lower() for kw in ["book", "doctor", "report", "cancel"]):
+        state["patient_identification_stage"] = "AWAITING_PATIENT_ID"
+        return handle_unknown_patient_identification_flow(conversation_code, state, message_text, current_lang, btn_id)
+
+    # Check if initial message contains registration info e.g. "I am a new patient. Name John, DOB 15/08/2004..."
+    if any(kw in msg_raw.lower() for kw in ["first-time", "first time", "new patient", "register"]) and not any(kw in msg_raw.lower() for kw in ["existing", "patient id"]):
+        state["patient_identification_stage"] = "REGISTRATION"
+        return handle_unknown_patient_identification_flow(conversation_code, state, message_text, current_lang, btn_id)
+
+    # Initial Gate Prompt: Ask "Are you an existing patient or a first-time visitor?"
+    state["patient_identification_stage"] = "AWAITING_PATIENT_TYPE"
+    prompt_text = language_service.get_patient_identification_prompt("PATIENT_IDENTIFICATION_PROMPT", current_lang)
+    state["interactive_buttons"] = [
+        language_service.get_translated_button("btn_first_time", current_lang),
+        language_service.get_translated_button("btn_existing_patient", current_lang)
+    ]
+    state_manager.save_conversation_state(conversation_code, state)
+    log_message_to_db(conversation_code, "AI_AGENT", prompt_text, current_lang, "PATIENT_IDENTIFICATION", state)
+    return {
+        "success": True,
+        "conversation_id": conversation_code,
+        "language": current_lang,
+        "intent": "PATIENT_IDENTIFICATION",
+        "response": prompt_text,
+        "interactive_buttons": state["interactive_buttons"]
+    }
+
+
 def process_agent_message(conversation_code: str, patient_code: str, message_text: str, language_override: str = None, interactive_id: str = None) -> dict:
     """
     Core NLP Orchestration:
@@ -852,7 +1279,13 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
     btn_id = interactive_id or (message_text.strip() if message_text and message_text.strip().startswith("btn_") else None)
     if not btn_id and message_text:
         m_strip = message_text.strip().lower()
-        if m_strip in ["hospital information", "hospital info"]:
+        if m_strip in ["first-time visitor", "first-time", "first time visitor", "first time", "new patient", "btn_first_time", "btn_first_time_visitor"]:
+            btn_id = "btn_first_time"
+        elif m_strip in ["existing patient", "existing", "btn_existing_patient"]:
+            btn_id = "btn_existing_patient"
+        elif m_strip in ["try again", "retry", "btn_retry_patient_id"]:
+            btn_id = "btn_retry_patient_id"
+        elif m_strip in ["hospital information", "hospital info"]:
             btn_id = "btn_hosp_info"
         elif m_strip in ["doctor availability", "doctor information", "doctor info"]:
             btn_id = "btn_doctor_avail"
@@ -891,11 +1324,11 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         elif m_strip in ["need assistance", "admission assistance", "admission help"]:
             btn_id = "btn_admission_help"
         # Dynamic doctor / dependent / slot / date / payment / report / appt buttons
-        elif m_strip in ["male", "btn_g_male"]:
+        elif m_strip in ["male", "btn_g_male", "ஆண்", "पुरुष", "పురుషుడు", "പുരുഷൻ", "ಪುರುಷ", "مرد"]:
             btn_id = "btn_g_male"
-        elif m_strip in ["female", "btn_g_female"]:
+        elif m_strip in ["female", "btn_g_female", "பெண்", "महिला", "స్త్రీ", "സ്ത്രീ", "ಮಹಿಳೆ", "عورت"]:
             btn_id = "btn_g_female"
-        elif m_strip in ["other", "btn_g_other"]:
+        elif m_strip in ["other", "btn_g_other", "மற்றவை", "अन्य", "ఇతర", "മറ്റുള്ളവ", "دیگر"]:
             btn_id = "btn_g_other"
         elif m_strip in ["today", "btn_date_today"]:
             btn_id = "btn_date_today"
@@ -939,6 +1372,28 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
     else:
         current_lang = state.get("language", "ENGLISH")
     state["language"] = current_lang
+
+    # Check if patient_code parameter was provided explicitly
+    if patient_code and not state.get("patient_id"):
+        conn = db_config.get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT id FROM patients WHERE UPPER(patient_code) = %s AND status = 'ACTIVE';", (patient_code.upper(),))
+            p_row = cur.fetchone()
+            if p_row:
+                state["patient_id"] = p_row[0]
+                state["entities"]["patient_id"] = p_row[0]
+        except Exception:
+            pass
+        finally:
+            cur.close()
+            conn.close()
+
+    # Patient Identification Gate for unknown / new WhatsApp number
+    if not state.get("patient_id") and state.get("patient_identification_stage") != "COMPLETED":
+        is_emergency = btn_id == "btn_emergency" or any(kw in (message_text or "").lower() for kw in ["emergency", "ambulance", "911", "icu"])
+        if not is_emergency:
+            return handle_unknown_patient_identification_flow(conversation_code, state, message_text, current_lang, btn_id)
 
     if btn_id:
         print(f"[BUTTON_ROUTING] Handling structured button tap: {btn_id}")
@@ -3207,9 +3662,9 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
             state["dependent_collection_substage"] = "GENDER"
             resp = f"What is *{dep_name}*'s gender? (Male / Female / Other)"
             state["interactive_buttons"] = [
-                {"id": "btn_g_male", "title": "Male"},
-                {"id": "btn_g_female", "title": "Female"},
-                {"id": "btn_g_other", "title": "Other"}
+                language_service.get_translated_button("btn_g_male", current_lang),
+                language_service.get_translated_button("btn_g_female", current_lang),
+                language_service.get_translated_button("btn_g_other", current_lang)
             ]
             state_manager.save_conversation_state(conversation_code, state)
             log_message_to_db(conversation_code, "AI_AGENT", resp, current_lang, "DEPENDENT_BOOKING", state)
@@ -6783,6 +7238,9 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
         is_insurance_escalation = btn_id == "btn_admission_help" or any(w in msg_lower for w in ["insurance", "claim", "coverage", "policy", "cashless", "tpa", "human", "agent", "receptionist", "speak to staff", "call me", "assistance", "need help", "need assistance"])
         is_doc_query = any(w in msg_lower for w in ["document", "bring", "require", "need", "id", "card", "proof", "what to bring"])
 
+        raw_doc = pa_record.get('doctor', '') if pa_record else ''
+        doc_disp = raw_doc if (raw_doc and raw_doc.startswith("Dr.")) else f"Dr. {raw_doc}"
+
         if is_yes:
             import preadmission_service
             if pa_record:
@@ -6790,7 +7248,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 p_name_str = f" {pa_record['patient_name']}" if pa_record.get('patient_name') else ""
                 response_text = (
                     f"✅ Thank you{p_name_str}! Your pre-admission registration (*{pa_record['code']}*) for *{pa_record['date']}* "
-                    f"under Dr. {pa_record['doctor']} ({pa_record['department']}) has been *CONFIRMED*.\n\n"
+                    f"under {doc_disp} ({pa_record['department']}) has been *CONFIRMED*.\n\n"
                     f"📋 *Required Documents to Bring:*\n{pa_record['pending_docs'] or 'Government ID, Health Insurance Card, Doctor Referral Note'}\n\n"
                     f"📍 Please report to the Ground Floor Admission Desk by *{pa_record['checkin'] or '09:00 AM'}*."
                 )
@@ -6806,7 +7264,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 preadmission_service.update_pre_admission_status(pa_record["id"], status="CANCELLED")
                 response_text = (
                     f"❌ Your pre-admission record (*{pa_record['code']}*) has been *CANCELLED* as requested.\n\n"
-                    f"If you need to reschedule your admission or consult with Dr. {pa_record['doctor']}, please let us know."
+                    f"If you need to reschedule your admission or consult with {doc_disp}, please let us know."
                 )
             else:
                 response_text = (
@@ -6855,7 +7313,7 @@ def process_agent_message(conversation_code: str, patient_code: str, message_tex
                 f"📅 *Admission Date:* {pa_record['date']}\n"
                 f"⏰ *Check-in Time:* {pa_record['checkin'] or '09:00 AM'}\n"
                 f"🏥 *Department:* {pa_record['department']}\n"
-                f"👨‍⚕️ *Doctor:* Dr. {pa_record['doctor']}\n"
+                f"👨‍⚕️ *Doctor:* {doc_disp}\n"
                 f"🛋️ *Type:* {pa_record['type']}\n"
                 f"📊 *Status:* {pa_record['status']}\n\n"
                 f"📝 *Instructions:* {pa_record['instructions'] or 'Fast 8 hours prior if instructed.'}\n"

@@ -274,7 +274,10 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_billing_inq": "Billing Info",
         "btn_preadm_inq": "Pre-Admission Info",
         "btn_continue_ai": "Continue with AI",
-        "btn_main_menu": "Main Menu"
+        "btn_main_menu": "Main Menu",
+        "btn_g_male": "Male",
+        "btn_g_female": "Female",
+        "btn_g_other": "Other"
     },
     "TAMIL": {
         "btn_cat_appts": "அப்பாயிண்ட்மெண்ட்",
@@ -725,4 +728,146 @@ def get_talk_to_staff_contact_response(language: str = "ENGLISH") -> str:
     if lang not in TALK_TO_STAFF_CONTACTS:
         lang = "ENGLISH"
     return TALK_TO_STAFF_CONTACTS[lang]
+
+
+# ---------------------------------------------------------------------------
+# Patient Identification & Registration Flow Helpers
+# ---------------------------------------------------------------------------
+PATIENT_ID_BUTTONS = {
+    "btn_first_time": {
+        "ENGLISH": "First-time Visitor",
+        "TAMIL": "முதல் முறை வருபவர்",
+        "HINDI": "पहली बार visitor",
+        "TELUGU": "మొదటిసారి విజిటర్",
+        "MALAYALAM": "ആദ്യമായി സന്ദർശനം",
+        "KANNADA": "ಮೊದಲ ಬಾರಿಗೆ ಬಂದವರು",
+        "URDU": "پہلی بار انے والے"
+    },
+    "btn_existing_patient": {
+        "ENGLISH": "Existing Patient",
+        "TAMIL": "ஏற்கனவே உள்ள நோயாளி",
+        "HINDI": "मौजूदा मरीज",
+        "TELUGU": "ప్రస్తుత పేషెంట్",
+        "MALAYALAM": "നിലവിലുള്ള രോഗി",
+        "KANNADA": "ಹಾಲಿ ರೋಗಿ",
+        "URDU": "موجودہ مریض"
+    },
+    "btn_retry_patient_id": {
+        "ENGLISH": "Try Again",
+        "TAMIL": "மீண்டும் முயற்சிக்க",
+        "HINDI": "पुनः प्रयास करें",
+        "TELUGU": "మళ్లీ ప్రయత్నించండి",
+        "MALAYALAM": "വീണ്ടും ശ്രമിക്കുക",
+        "KANNADA": "ಮರುಪ್ರಯತ್ನಿಸಿ",
+        "URDU": "دوبارہ کوشش کریں"
+    }
+}
+
+for _b_id, _lang_map in PATIENT_ID_BUTTONS.items():
+    for _l_code, _t_title in _lang_map.items():
+        if _l_code in MENU_BUTTON_TRANSLATIONS:
+            MENU_BUTTON_TRANSLATIONS[_l_code][_b_id] = _t_title
+        if _b_id == "btn_first_time":
+            if _l_code in MENU_BUTTON_TRANSLATIONS:
+                MENU_BUTTON_TRANSLATIONS[_l_code]["btn_first_time_visitor"] = _t_title
+
+GENDER_BUTTONS = {
+    "btn_g_male": {
+        "ENGLISH": "Male",
+        "TAMIL": "ஆண்",
+        "HINDI": "पुरुष",
+        "TELUGU": "పురుషుడు",
+        "MALAYALAM": "പുരുഷൻ",
+        "KANNADA": "ಪುರುಷ",
+        "URDU": "مرد"
+    },
+    "btn_g_female": {
+        "ENGLISH": "Female",
+        "TAMIL": "பெண்",
+        "HINDI": "महिला",
+        "TELUGU": "స్త్రీ",
+        "MALAYALAM": "സ്ത്രീ",
+        "KANNADA": "ಮಹಿಳೆ",
+        "URDU": "عورت"
+    },
+    "btn_g_other": {
+        "ENGLISH": "Other",
+        "TAMIL": "மற்றவை",
+        "HINDI": "अन्य",
+        "TELUGU": "ఇతర",
+        "MALAYALAM": "മറ്റുള്ളവ",
+        "KANNADA": "ఇతర",
+        "URDU": "دیگر"
+    }
+}
+
+for _b_id, _lang_map in GENDER_BUTTONS.items():
+    for _l_code, _t_title in _lang_map.items():
+        if _l_code in MENU_BUTTON_TRANSLATIONS:
+            MENU_BUTTON_TRANSLATIONS[_l_code][_b_id] = _t_title
+
+PATIENT_ID_MESSAGES = {
+    "PATIENT_IDENTIFICATION_PROMPT": {
+        "ENGLISH": "Welcome to Meridian Hospital.\n\nAre you an existing patient or a first-time visitor?",
+        "TAMIL": "மெரிடியன் மருத்துவமனைக்கு உங்களை வரவேற்கிறோம்.\n\nநீங்கள் ஏற்கனவே உள்ள நோயாளியா அல்லது முதல் முறை வருகிறீர்களா?",
+        "HINDI": "मेरिडियन अस्पताल में आपका स्वागत है।\n\nक्या आप एक मौजूदा मरीज हैं या पहली बार आए हैं?",
+        "TELUGU": "మెరిడియన్ హాస్పిటల్‌కు స్వాగతం.\n\nమీరు ప్రస్తుతం ఉన్న పేషెంటా లేదా మొదటిసారి వచ్చినవారా?",
+        "MALAYALAM": "മെറിഡിയൻ ആശുപത്രിയിലേക്ക് സ്വാഗതം.\n\nനിങ്ങൾ നിലവിലുള്ള രോഗിയാണോ അതോ ആദ്യമായി സന്ദർശിക്കുന്നയാളാണോ?",
+        "KANNADA": "ಮೆರಿಡಿಯನ್ ಆಸ್ಪತ್ರೆಗೆ ಸುಸ್ವಾಗತ.\n\nನೀವು ಹಾಲಿ ರೋಗಿಯೇ ಅಥವಾ ಮೊದಲ ಬಾರಿಗೆ ಬಂದವರೇ?",
+        "URDU": "میریڈین ہسپتال میں آپ کا خیر مقدم ہے۔\n\nکیا آپ ایک موجودہ مریض ہیں یا پہلی بار آئے ہیں؟"
+    },
+    "ENTER_PATIENT_ID_PROMPT": {
+        "ENGLISH": "Please provide your Patient ID so I can locate your existing patient record.",
+        "TAMIL": "உங்கள் நோயாளி பதிவைக் கண்டறிய உங்கள் நோயாளி ஐடியை வழங்கவும்.",
+        "HINDI": "कृपया अपना रोगी आईडी प्रदान करें ताकि मैं आपका रोगी रिकॉर्ड पा सकूं।",
+        "TELUGU": "దయచేసి మీ పేషెంట్ ఐడీని అందించండి.",
+        "MALAYALAM": "നിങ്ങളുടെ പേഷ്യന്റ് ഐഡി ദയവായി നൽകുക.",
+        "KANNADA": "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪೇಷಂಟ್ ഐಡಿ ನೀಡಿ.",
+        "URDU": "براہ کرم اپنا مریض آئی ڈی فراہم کریں۔"
+    },
+    "PATIENT_ID_NOT_FOUND_PROMPT": {
+        "ENGLISH": "I couldn't find a patient record with that Patient ID. Please check the ID and try again.",
+        "TAMIL": "அந்த நோயாளி ஐடியில் பதிவு எதுவும் கிடைக்கவில்லை. தயவுசெய்து ஐடியை சரிபார்த்து மீண்டும் முயற்சிக்கவும்.",
+        "HINDI": "उस रोगी आईडी के साथ कोई रिकॉर्ड नहीं मिला। कृपया आईडी की जांच करें और पुनः प्रयास करें।",
+        "TELUGU": "ఆ పేషెంట్ ఐడీతో రికార్డు కనుగొనబడలేదు. దయచేసి మళ్లీ ప్రయత్నించండి.",
+        "MALAYALAM": "ആ പേഷ്യന്റ് ഐഡിയിൽ റെക്കോർഡ് കണ്ടെത്താനായില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക.",
+        "KANNADA": "ಆ ಪೇಷಂಟ್ ಐಡಿಯಲ್ಲಿ ಯಾವುದೇ ದಾಖಲೆ ಸಿಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮರುಪ್ರಯತ್ನಿಸಿ.",
+        "URDU": "اس مریض آئی ڈی کے ساتھ کوئی ریکارڈ نہیں ملا۔ براہ کرم دوبارہ کوشش کریں۔"
+    },
+    "PATIENT_FOUND_PROMPT": {
+        "ENGLISH": "Thank you. I found your patient record.\n\nPatient ID: {patient_code}\nName: {name}\nDOB: {dob}\nGender: {gender}\n\nHow can I help you today?",
+        "TAMIL": "நன்றி. உங்கள் நோயாளி பதிவு கண்டறியப்பட்டது.\n\nநோயாளி ஐடி: {patient_code}\nபெயர்: {name}\nபிறந்த தேதி: {dob}\nபாலினம்: {gender}\n\nஇன்று உங்களுக்கு நான் எவ்வாறு உதவ வேண்டும்?",
+        "HINDI": "धन्यवाद। आपका रोगी रिकॉर्ड मिल गया है।\n\nरोगी आईडी: {patient_code}\nनाम: {name}\nजन्म तिथि: {dob}\nलिंग: {gender}\n\nआज मैं आपकी क्या मदद कर सकता हूँ?",
+        "TELUGU": "ధన్యవాదాలు. మీ పేషెంట్ రికార్డు కనుగొనబడింది.\n\nపేషెంట్ ఐడీ: {patient_code}\nపేరు: {name}\nపుట్టిన తేదీ: {dob}\nలింగం: {gender}\n\nఈ రోజు మీకు ఎలా సహాయపడాలి?",
+        "MALAYALAM": "നന്ദി. നിങ്ങളുടെ പേഷ്യന്റ് റെക്കോർഡ് കണ്ടെത്തി.\n\nപേഷ്യന്റ് ഐഡി: {patient_code}\nപേര്: {name}\nജനനത്തീയതി: {dob}\nലിംഗം: {gender}\n\nഇന്ന് ഞാൻ എങ്ങനെ സഹായിക്കണം?",
+        "KANNADA": "ಧನ್ಯವಾದಗಳು. ನಿಮ್ಮ ಪೇಷಂಟ್ ದಾಖಲೆ ಸಿಕ್ಕಿದೆ.\n\nಪೇಷಂಟ್ ಐಡಿ: {patient_code}\nಹೆಸರು: {name}\nಹುಟ್ಟಿದ ದಿನಾಂಕ: {dob}\nಲಿಂಗ: {gender}\n\nಇಂದು ನಾನು ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?",
+        "URDU": "شکریہ۔ آپ کا مریض کا ریکارڈ مل گیا ہے۔\n\nمریض آئی ڈی: {patient_code}\nنام: {name}\nتاریخ پیدائش: {dob}\nجنس: {gender}\n\nآج میں آپ کی کیا مدد کر سکتا ہوں؟"
+    },
+    "REGISTRATION_SUCCESS_PROMPT": {
+        "ENGLISH": "Thank you, {name}. Your registration with Meridian Hospital is complete. Patient ID: {patient_code}\n\nHow can I help you today?",
+        "TAMIL": "நன்றி {name}. மெரிடியன் மருத்துவமனையில் உங்கள் பதிவு நிறைவடைந்தது. நோயாளி ஐடி: {patient_code}\n\nஇன்று உங்களுக்கு நான் எவ்வாறு உதவ வேண்டும்?",
+        "HINDI": "धन्यवाद {name}। मेरिडियन अस्पताल में आपका पंजीकरण पूरा हो गया है। रोगी आईडी: {patient_code}\n\nआज मैं आपकी क्या मदद कर सकता हूँ?",
+        "TELUGU": "ధన్యవాదాలు {name}. మీ రిజిస్ట్రేషన్ పూర్తయింది. పేషెంట్ ఐడీ: {patient_code}\n\nఈ రోజు మీకు ఎలా సహాయపడాలి?",
+        "MALAYALAM": "നന്ദി {name}. നിങ്ങളുടെ രജിസ്ട്രേഷൻ പൂർത്തിയായി. പേഷ്യന്റ് ഐഡി: {patient_code}\n\nഇന്ന് ഞാൻ എങ്ങനെ സഹായിക്കണം?",
+        "KANNADA": "ಧನ್ಯವಾದಗಳು {name}. ನಿಮ್ಮ ನೋಂದಣಿ ಯಶಸ್ವಿಯಾಗಿದೆ. ಪೇಷಂಟ್ ಐಡಿ: {patient_code}\n\nಇಂದು ನಾನು ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?",
+        "URDU": "شکریہ {name}۔ آپ کی رجسٹریشن مکمل ہو گئی ہے۔ مریض آئی ڈی: {patient_code}\n\nآج میں آپ کی کیا مدد کر سکتا ہوں؟"
+    }
+}
+
+for _p_key, _lang_map in PATIENT_ID_MESSAGES.items():
+    for _l_code, _t_msg in _lang_map.items():
+        if _l_code in TRANSLATIONS:
+            TRANSLATIONS[_l_code][_p_key] = _t_msg
+
+def get_patient_identification_prompt(key: str, language: str = "ENGLISH", **kwargs) -> str:
+    """Returns patient identification prompt translated to requested language with optional keyword formatting."""
+    lang = (language or "ENGLISH").upper()
+    if lang not in TRANSLATIONS:
+        lang = "ENGLISH"
+    msg = TRANSLATIONS[lang].get(key, TRANSLATIONS["ENGLISH"].get(key, ""))
+    try:
+        return msg.format(**kwargs) if kwargs else msg
+    except Exception:
+        return msg
+
 

@@ -104,15 +104,20 @@ def create_pre_admission(
         if adm_type_clean not in valid_types:
             raise PreAdmissionValidationError(f"Invalid admission_type '{admission_type}'. Allowed: {list(valid_types)}")
 
-        # 8. Prevent Duplicate Active Pre-Admission
+        # 8. Handle existing active pre-admission records for patient
         cur.execute("""
             SELECT id, pre_admission_code FROM pre_admissions
-            WHERE patient_id = %s AND status NOT IN ('COMPLETED', 'CANCELLED')
-            LIMIT 1;
+            WHERE patient_id = %s AND status NOT IN ('COMPLETED', 'CANCELLED');
         """, (patient_id,))
-        dup_row = cur.fetchone()
-        if dup_row:
-            raise PreAdmissionValidationError(f"Patient '{pat_name}' already has an active pre-admission record ({dup_row[1]}).")
+        dup_rows = cur.fetchall()
+        if dup_rows:
+            for dup in dup_rows:
+                cur.execute("""
+                    UPDATE pre_admissions
+                    SET status = 'CANCELLED', remarks = 'Superseded by new pre-admission registration', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s;
+                """, (dup[0],))
+            print(f"[PRE_ADMISSION] Superseded {len(dup_rows)} active pre-admission record(s) for patient ID {patient_id}")
 
         # 9. Format check-in time
         time_obj = None
@@ -209,6 +214,9 @@ def dispatch_pre_admission_notification(pre_admission_id: int) -> Dict[str, Any]
          doc_name, dept_name) = row
 
         target_wa = wa_phone or phone
+        if not target_wa or not str(target_wa).strip():
+            return {"success": False, "error": "Patient does not have a registered phone or WhatsApp number"}
+
         pat_full_name = f"{f_name} {l_name or ''}".strip()
 
         # Check patient's conversation preferred language
@@ -221,6 +229,8 @@ def dispatch_pre_admission_notification(pre_admission_id: int) -> Dict[str, Any]
         adm_type_disp = adm_type.replace("_", " ").title()
         checkin_disp = str(checkin_time)[:5] if checkin_time else "09:00 AM"
 
+        doc_disp = doc_name if (doc_name and doc_name.startswith("Dr.")) else f"Dr. {doc_name}"
+
         msg = (
             f"🏥 *MERIDIAN HOSPITAL — PRE-ADMISSION CLEARANCE* 🏥\n\n"
             f"Dear *{f_name}*,\n\n"
@@ -230,7 +240,7 @@ def dispatch_pre_admission_notification(pre_admission_id: int) -> Dict[str, Any]
             f"• *Expected Admission Date:* {formatted_date}\n"
             f"• *Reporting Time:* {checkin_disp}\n"
             f"• *Department:* {dept_name}\n"
-            f"• *Attending Doctor:* Dr. {doc_name}\n"
+            f"• *Attending Doctor:* {doc_disp}\n"
             f"• *Admission Type:* {adm_type_disp}\n\n"
             f"📄 *Required Documents to Bring:*\n"
             f"• {pending_docs or 'Government Photo ID, Health Insurance Card, Referral Notes'}\n\n"
@@ -247,9 +257,44 @@ def dispatch_pre_admission_notification(pre_admission_id: int) -> Dict[str, Any]
             RETURNING id;
         """, (pat_id, msg))
         notif_id = cur.fetchone()[0]
+
+        # 2. Ensure active conversation & log message for patient chat history
+        clean_target_wa = normalize_phone(target_wa) if target_wa else ""
+        cur.execute("""
+            SELECT id, conversation_code FROM conversations
+            WHERE patient_id = %s OR whatsapp_number = %s OR whatsapp_number = %s
+            ORDER BY id DESC LIMIT 1;
+        """, (pat_id, target_wa, clean_target_wa))
+        conv_row = cur.fetchone()
+        if not conv_row:
+            import uuid
+            conv_code = f"CONV_WA_{uuid.uuid4().hex[:8].upper()}"
+            cur.execute("""
+                INSERT INTO conversations (
+                    conversation_code, patient_id, whatsapp_number, channel, language, current_intent, conversation_status, created_at, updated_at
+                ) VALUES (%s, %s, %s, 'WHATSAPP', %s, 'PRE_ADMISSION_CLEARANCE', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id, conversation_code;
+            """, (conv_code, pat_id, target_wa, lang))
+            conv_row = cur.fetchone()
+
+        conv_id = conv_row[0]
+        conv_code = conv_row[1]
+
+        import json
+        notif_meta = {
+            "pre_admission_id": pre_admission_id,
+            "pre_admission_code": pa_code,
+            "notification_id": notif_id,
+            "channel": "WHATSAPP"
+        }
+        cur.execute("""
+            INSERT INTO messages (
+                conversation_id, sender_type, message_type, message_text, language, intent, metadata, created_at
+            ) VALUES (%s, 'AI_AGENT', 'TEXT', %s, %s, 'PRE_ADMISSION_CLEARANCE', %s::jsonb, CURRENT_TIMESTAMP);
+        """, (conv_id, msg, lang, json.dumps(notif_meta)))
         conn.commit()
 
-        # 2. Dispatch via voice.whatsapp_client service
+        # 3. Dispatch via voice.whatsapp_client service
         send_success = False
         ext_msg_id = None
         try:
@@ -277,7 +322,7 @@ def dispatch_pre_admission_notification(pre_admission_id: int) -> Dict[str, Any]
             print(f"[PRE_ADMISSION_NOTIF] Outbound WhatsApp dispatch failed: {ws_err}")
             send_success = False
 
-        # 3. Update Notification Status
+        # 4. Update Notification Status
         if send_success:
             cur.execute("""
                 UPDATE notifications
@@ -495,57 +540,73 @@ def get_pre_admission_conversation(pre_admission_id: int) -> Dict[str, Any]:
         patient_id = pa_row[2]
         pat_name = f"{pa_row[3]} {pa_row[4] or ''}".strip()
         phone = pa_row[5] or pa_row[6]
+        clean_p = normalize_phone(phone) if phone else ""
 
         # Find conversation record
         cur.execute("""
             SELECT id, conversation_code, language, current_intent, conversation_status, created_at
             FROM conversations
-            WHERE patient_id = %s OR whatsapp_number = %s
+            WHERE patient_id = %s OR whatsapp_number = %s OR whatsapp_number = %s
             ORDER BY id DESC LIMIT 1;
-        """, (patient_id, phone))
+        """, (patient_id, phone, clean_p))
         conv_row = cur.fetchone()
-        if not conv_row:
-            return {
-                "success": True,
-                "pre_admission_id": pre_admission_id,
-                "patient_name": pat_name,
-                "conversation": None,
-                "messages": []
-            }
-
-        conv_id = conv_row[0]
-        conv_code = conv_row[1]
-
-        cur.execute("""
-            SELECT id, sender_type, message_text, intent, language, created_at
-            FROM messages
-            WHERE conversation_id = %s
-            ORDER BY id ASC;
-        """, (conv_id,))
-        msg_rows = cur.fetchall()
 
         messages = []
-        for m in msg_rows:
-            messages.append({
-                "id": m[0],
-                "sender_type": m[1],
-                "message_text": m[2],
-                "intent": m[3],
-                "language": m[4],
-                "timestamp": str(m[5]) if m[5] else None
-            })
+        conv_info = None
 
-        return {
-            "success": True,
-            "pre_admission_id": pre_admission_id,
-            "patient_name": pat_name,
-            "conversation": {
+        if conv_row:
+            conv_id = conv_row[0]
+            conv_code = conv_row[1]
+            conv_info = {
                 "id": conv_id,
                 "conversation_code": conv_code,
                 "language": conv_row[2],
                 "current_intent": conv_row[3],
                 "status": conv_row[4],
-            },
+            }
+
+            cur.execute("""
+                SELECT id, sender_type, message_text, intent, language, created_at
+                FROM messages
+                WHERE conversation_id = %s
+                ORDER BY id ASC;
+            """, (conv_id,))
+            msg_rows = cur.fetchall()
+
+            for m in msg_rows:
+                messages.append({
+                    "id": m[0],
+                    "sender_type": m[1],
+                    "message_text": m[2],
+                    "intent": m[3],
+                    "language": m[4],
+                    "timestamp": str(m[5]) if m[5] else None
+                })
+
+        # Fallback if no messages in messages table but notifications exist
+        if not messages:
+            cur.execute("""
+                SELECT id, message, status, created_at
+                FROM notifications
+                WHERE patient_id = %s AND notification_type = 'ADMISSION_REMINDER'
+                ORDER BY id ASC;
+            """, (patient_id,))
+            notif_rows = cur.fetchall()
+            for n in notif_rows:
+                messages.append({
+                    "id": f"notif_{n[0]}",
+                    "sender_type": "AI_AGENT",
+                    "message_text": n[1],
+                    "intent": "PRE_ADMISSION_CLEARANCE",
+                    "language": "ENGLISH",
+                    "timestamp": str(n[3]) if n[3] else None
+                })
+
+        return {
+            "success": True,
+            "pre_admission_id": pre_admission_id,
+            "patient_name": pat_name,
+            "conversation": conv_info,
             "messages": messages
         }
     except Exception as e:

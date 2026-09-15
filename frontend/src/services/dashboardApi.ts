@@ -336,12 +336,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T | nul
     clearTimeout(timer);
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      const errorMsg = data?.detail || `Server error (${res.status})`;
+      const errorMsg = typeof data?.detail === 'string' ? data.detail : (data?.error || `Server error (${res.status})`);
       console.warn(`[Dashboard API] ${path} returned ${res.status}:`, errorMsg);
       if (res.status === 401) {
         sessionStorage.removeItem('meridian_user');
       }
-      return null;
+      if (data && typeof data === 'object') {
+        return { success: false, error: errorMsg, ...data } as T;
+      }
+      return { success: false, error: errorMsg } as T;
     }
     return data as T;
   } catch (err) {

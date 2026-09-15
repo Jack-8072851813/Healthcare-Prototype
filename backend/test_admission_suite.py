@@ -236,16 +236,17 @@ def test_09_10_valid_admission_creation_and_duplicate_prevention():
     assert res["pre_admission_code"].startswith("PAD")
     assert res["admission_type"] == "SURGERY"
 
-    # Scenario 09: Test duplicate active admission prevention
-    with pytest.raises(preadmission_service.PreAdmissionValidationError) as exc:
-        preadmission_service.create_pre_admission(
-            patient_id=patient_id,
-            doctor_id=doctor_id,
-            department_id=dept_id,
-            expected_admission_date="2026-10-20",
-            admission_type="INPATIENT"
-        )
-    assert "already has an active pre-admission record" in str(exc.value)
+    # Scenario 09: Test seamless superseding when re-registering an active pre-admission
+    res2 = preadmission_service.create_pre_admission(
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=dept_id,
+        expected_admission_date="2026-10-20",
+        admission_type="INPATIENT"
+    )
+    assert res2["success"] is True
+    assert res2["pre_admission_code"].startswith("PAD")
+    assert res2["pre_admission_code"] != res["pre_admission_code"]
 
 
 def test_11_12_13_14_notification_dispatch_and_language():
@@ -433,4 +434,43 @@ def test_26_confirm_admission_button_and_text():
     assert res_text["intent"] == "PRE_ADMISSION"
     assert "CONFIRMED" in res_text["response"] or "CONFIRMED" in res_text["response"].upper()
     assert "Pediatrics" not in res_text["response"] or "consult our" not in res_text["response"]
+
+
+def test_19_notification_dispatch_and_conversation_sync():
+    """Verify that dispatching a pre-admission notification creates/links conversation and message records."""
+    patient_id, doctor_id, dept_id = get_test_patient_and_doctor()
+    
+    # Cancel any active pre-admissions
+    conn = db_config.get_db_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE pre_admissions SET status = 'CANCELLED' WHERE patient_id = %s;", (patient_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    # Create new pre-admission
+    res = preadmission_service.create_pre_admission(
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=dept_id,
+        expected_admission_date="2026-12-01",
+        admission_type="INPATIENT",
+        instructions="Fast for 8 hours prior to check-in."
+    )
+    pa_id = res["pre_admission_id"]
+
+    # Dispatch notification explicitly
+    notif_res = preadmission_service.dispatch_pre_admission_notification(pa_id)
+    assert notif_res["success"] is True
+
+    # Retrieve conversation details for pre-admission
+    conv_data = preadmission_service.get_pre_admission_conversation(pa_id)
+    assert conv_data["success"] is True
+    assert len(conv_data["messages"]) > 0
+    
+    # Verify notification content in conversation messages
+    last_msg = conv_data["messages"][-1]
+    assert last_msg["sender_type"] == "AI_AGENT"
+    assert "PRE-ADMISSION CLEARANCE" in last_msg["message_text"]
+
 

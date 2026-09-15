@@ -23,7 +23,6 @@ const Sidebar: React.FC = () => {
 
   const adminMenuItems: MenuItem[] = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/admin/dashboard' },
-    { label: 'WhatsApp Patient Desk', icon: Bot, path: '/patient-chat' },
     { label: 'Patients', icon: Users, path: '/admin/patients' },
     { label: 'Doctors', icon: UserCog, path: '/admin/doctors' },
     { label: 'Doctor Schedules', icon: Clock, path: '/admin/schedules' },
@@ -39,7 +38,6 @@ const Sidebar: React.FC = () => {
 
   const doctorMenuItems: MenuItem[] = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/doctor/dashboard' },
-    { label: 'WhatsApp Patient Desk', icon: Bot, path: '/patient-chat' },
     { label: 'Appointments', icon: CalendarCheck, path: '/doctor/appointments' },
     { label: 'Patient Records', icon: FileText, path: '/doctor/patient-records' },
     { label: 'Clinical Notes', icon: ClipboardPlus, path: '/doctor/clinical-notes' },

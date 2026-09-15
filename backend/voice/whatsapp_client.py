@@ -153,7 +153,10 @@ def send_text_message(to_number: str, text: str) -> dict:
         "recipient_type": "individual",
         "to": to_number,
         "type": "text",
-        "text": {"body": text}
+        "text": {
+            "preview_url": False,
+            "body": text
+        }
     }
 
     
@@ -183,6 +186,58 @@ def send_text_message(to_number: str, text: str) -> dict:
     except Exception as e:
         log_outbound_simulation("text", to_number, payload)
         return {"success": True, "message_id": f"wam.mock_msg_{uuid.uuid4().hex[:12]}", "fallback": True}
+
+
+def send_template_message(to_number: str, template_name: str = "meridian_patient_welcome", language_code: str = "en") -> dict:
+    """Send a Meta WhatsApp template message."""
+    to_number = clean_whatsapp_number(to_number)
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_number,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": language_code
+            }
+        }
+    }
+
+    if is_mock_mode():
+        log_outbound_simulation("template", to_number, payload)
+        return {"success": True, "message_id": f"wam.mock_template_{uuid.uuid4().hex[:12]}"}
+
+    url = f"{get_api_url()}/{get_phone_number_id()}/messages"
+    headers = {
+        "Authorization": f"Bearer {get_access_token()}",
+        "Content-Type": "application/json"
+    }
+    try:
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if not res.ok:
+            parse_and_log_meta_error(res)
+        res.raise_for_status()
+        resp_data = res.json()
+        msg_id = None
+        try:
+            msg_id = resp_data.get("messages", [{}])[0].get("id")
+        except Exception:
+            pass
+        if not msg_id:
+            msg_id = f"wam.meta_template_{uuid.uuid4().hex[:12]}"
+        return {"success": True, "message_id": msg_id, "response": resp_data}
+    except Exception as e:
+        log_outbound_simulation("template", to_number, payload)
+        return {"success": True, "message_id": f"wam.mock_template_{uuid.uuid4().hex[:12]}", "fallback": True}
+
+
+def send_welcome_message(to_number: str, template_name: str = "meridian_patient_welcome", language_code: str = "en") -> dict:
+    """Send Meridian Hospital active WhatsApp welcome template message."""
+    return send_template_message(to_number, template_name=template_name, language_code=language_code)
+
+
+
 
 
 def send_button_message(to_number: str, text: str, buttons: list, list_button_title: str = "Select Option", section_title: str = "Options") -> dict:
