@@ -56,9 +56,11 @@ META_APP_SECRET = os.getenv("META_APP_SECRET")
 
 
 def is_duplicate_message(msg_id: str) -> bool:
-    """Returns True if this msg_id was already processed (exists in messages metadata)."""
+    """Returns True if this msg_id was already processed or is currently being processed."""
     if not msg_id:
         return False
+    if msg_id in _processed_test_wamids:
+        return True
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
@@ -503,6 +505,10 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 "session_id": session_id,
                 "detail": "Duplicate message ignored"
             }
+        if msg_id:
+            _processed_test_wamids.add(msg_id)
+            if len(_processed_test_wamids) > 2000:
+                _processed_test_wamids.clear()
 
         # 1. Text or Interactive Message flow
         if msg_type in ["text", "interactive"]:

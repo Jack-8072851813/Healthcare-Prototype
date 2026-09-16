@@ -371,61 +371,71 @@ def map_symptom_to_department_name(text: str) -> str:
     rules = [
         # 1. DERMATOLOGY — checked FIRST (highest specificity for skin/hair)
         (
-            r"\b(hair|hairfall|hair\s*fall|hair\s*fal|hair\s*loss|hair\s*shedding|hair\s*falling|"
+            r"(?:\b(hair|hairfall|hair\s*fall|hair\s*fal|hair\s*loss|hair\s*shedding|hair\s*falling|"
             r"hair\s*problem|hair\s*issue|hair\s*thinning|losing\s*hair|"
             r"bald|baldness|thinning|scalp|dandruff|"
             r"acne|pimple|pimples|pimpls|blackhead|whitehead|"
             r"skin|skinn|rash|itching|itchying|itch|itchy|eczema|psoriasis|"
             r"allergy|skin\s*infection|hives|dermatitis|"
             r"lesion|wound\s*healing|pigmentation|dark\s*spot|"
-            r"dermatology|dermatologist)\b",
+            r"dermatology|dermatologist)\b|"
+            r"முடி\s*உதிர்தல்|முடி\s*கொட்டுதல்|முடி\s*பிரச்சனை|தோல்|தோல்\s*நோய்|அரிப்பு|பரு|முடி|"
+            r"बाल\s*झड़ना|बालों\s*का\s*झड़ना|त्वचा|खुजली|मुहासे|बाल|"
+            r"జుట్టు\s*రాలడం|చర్మం|దురద|മുടി\s*കൊഴിച്ചിൽ|ചർമ്മം|ಕೂದಲು\s*ಉದುರುವಿಕೆ|ಚರ್ಮ|بال\s*جھڑنا)",
             "Dermatology"
         ),
         # 2. PEDIATRICS — checked early (child/baby keywords are specific)
         (
-            r"\b(child|chld|baby|infant|toddler|newborn|kid|kd|pediatric|pediatrics|pediatrician|"
+            r"(?:\b(child|chld|baby|infant|toddler|newborn|kid|kd|pediatric|pediatrics|pediatrician|"
             r"my\s*son|my\s*sonn|my\s*daughter|my\s*daughtr|my\s*daugter|my\s*doughter|my\s*daugther|"
             r"(son|sonn|daughter|daughtr|daugter|doughter)\s*(has|have)|"
             r"(son|sonn|daughter|daughtr|daugter|doughter)\s*fever|child\s*fever|kid\s*fever|baby\s*fever|"
-            r"children|my\s*kid|young\s*child)\b",
+            r"children|my\s*kid|young\s*child)\b|"
+            r"குழந்தை|குழந்தைக்கு|சிறுவன்|சிறுமி|बच्चा|बच्चे|పిల్లలు|పాప|കുട്ടി|ಮಗು|طفل)",
             "Pediatrics"
         ),
         # 3. CARDIOLOGY — before General Medicine (chest-related)
         (
-            r"\b(chest\s*pain|chest\s*hurts|chest\s*hurting|chest\s*ache|heart|cardio|cardiac|palpitations|breathlessness|"
-            r"chest\s*tightness|blood\s*pressure|hypertension|cardiologist|cardiology)\b",
+            r"(?:\b(chest\s*pain|chest\s*hurts|chest\s*hurting|chest\s*ache|heart|cardio|cardiac|palpitations|breathlessness|"
+            r"chest\s*tightness|blood\s*pressure|hypertension|cardiologist|cardiology)\b|"
+            r"நெஞ்சு\s*வலி|இதயம்|மாரடைப்பு|सीने\s*में\s*दर्द|छाती\s*में\s*दर्द|दिल|ఛాతీ\s*నొప్పి|గుండె|നെഞ്ചുവേദന|ഹൃദയം|ಎದೆ\s*ನೋವು)",
             "Cardiology"
         ),
         # 4. ENT — before General Medicine (ear/nose/throat)
         (
-            r"\b(ear|earache|ear\s*pain|eare|hearing|sinus|sinus\s*infection|nasal|nasel|nose|nos|nos\s*pain|"
-            r"throat|thorat|tonsil|snoring|otitis|rhinitis|ent\s*specialist)\b",
+            r"(?:\b(ear|earache|ear\s*pain|eare|hearing|sinus|sinus\s*infection|nasal|nasel|nose|nos|nos\s*pain|"
+            r"throat|thorat|tonsil|snoring|otitis|rhinitis|ent\s*specialist)\b|"
+            r"காது\s*வலி|மூக்கு|தொண்டை\s*வலி|கான்|कान|गले|చెవి|ముక్కు|గొంతు|ചെവി|മൂക്ക്|തൊണ്ട)",
             "ENT"
         ),
         # 5. ORTHOPEDICS — before General Medicine (bone/joint)
         (
-            r"\b(joint\s*pain|joiont\s*pain|bone\s*pain|back\s*pain|bakk\s*pain|backache|knee\s*pain|knne\s*pain|"
+            r"(?:\b(joint\s*pain|joiont\s*pain|bone\s*pain|back\s*pain|bakk\s*pain|backache|knee\s*pain|knne\s*pain|"
             r"spine|fracture|shoulder\s*pain|neck\s*pain|arthritis|sprain|"
-            r"ligament|orthopedic|orthopedics|orthopedist)\b",
+            r"ligament|orthopedic|orthopedics|orthopedist)\b|"
+            r"எலும்பு\s*வலி|மூட்டு\s*வலி|முதுகு\s*வலி|கால்\s*வலி|हड्डी|जोड़ों\s*में\s*दर्द|पीठ\s*दर्द|కీళ్ల\s*నొప్పులు|ఎముకల|അസ്ഥി|സന്ധിവേദന|ಮೂಳೆ)",
             "Orthopedics"
         ),
         # 6. NEUROLOGY — before General Medicine (brain/nerve)
         (
-            r"\b(migraine|neurological|vertigo|seizure|numbness|paralysis|"
-            r"nerve\s*pain|brain|head\s*injury|neurologist|neurology)\b",
+            r"(?:\b(migraine|neurological|vertigo|seizure|numbness|paralysis|"
+            r"nerve\s*pain|brain|head\s*injury|neurologist|neurology)\b|"
+            r"தலைவலி|நரம்பு|மண்டை|सिरदर्द|नस|నరాల|തലവേദന|ತಲೆನೋವು)",
             "Neurology"
         ),
         # 7. GYNECOLOGY — women-specific
         (
-            r"\b(pregnancy|pregnant|period|menstrual|menstruation|pelvic\s*pain|"
-            r"uterine|ovary|women\s*health|reproductive|gynecologist|gynecology)\b",
+            r"(?:\b(pregnancy|pregnant|period|menstrual|menstruation|pelvic\s*pain|"
+            r"uterine|ovary|women\s*health|reproductive|gynecologist|gynecology)\b|"
+            r"கர்ப்பம்|மாதவிடாய்|गर्भावस्था|मासिक\s*धर्म|గర్భం|ഗർഭം|ಗರ್ಭಿಣಿ)",
             "Gynecology"
         ),
         # 8. GENERAL MEDICINE — LAST (most generic)
         (
-            r"\b(fever|fevr|cold|cld|cough|couggh|stomach|flu|nausea|vomiting|diarrhea|fatigue|"
+            r"(?:\b(fever|fevr|cold|cld|cough|couggh|stomach|flu|nausea|vomiting|diarrhea|fatigue|"
             r"weakness|body\s*pain|feverish|pain|payn|payning|infection|ailment|sick|illness|"
-            r"general\s*checkup|headache|runny\s*nose|sneezing|sore\s*throat)\b",
+            r"general\s*checkup|headache|runny\s*nose|sneezing|sore\s*throat)\b|"
+            r"காய்ச்சல்|வயிற்று\s*வலி|இருமல்|சளி|வயிறு|बुखार|खांसी|सर्दी|पेट\s*दर्द|జ్వరం|దగ్గు|నొప్పి|പനി|ചുമ|വയറുവേദന|ಜ್ವರ|ಕೆಮ್ಮು)",
             "General Medicine"
         ),
     ]

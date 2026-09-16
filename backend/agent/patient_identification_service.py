@@ -25,6 +25,60 @@ import db_config
 from utils.phone_utils import get_phone_query_condition, get_phone_query_params, normalize_phone
 
 
+def get_all_patients_by_phone(phone_number: str) -> List[Dict[str, Any]]:
+    """
+    Returns a list of all active patient records associated with a WhatsApp phone number.
+    Supports multi-patient profiles under one contact channel.
+    """
+    if not phone_number:
+        return []
+
+    conn = db_config.get_db_connection()
+    cur = conn.cursor()
+    try:
+        cond = get_phone_query_condition()
+        params = get_phone_query_params(phone_number)
+        
+        cur.execute(f"""
+            SELECT id, patient_code, first_name, last_name, date_of_birth, gender,
+                   phone, whatsapp_number, email, address, city, state, pincode, status, created_at
+            FROM patients
+            WHERE {cond} AND status = 'ACTIVE'
+            ORDER BY id ASC;
+        """, params)
+        rows = cur.fetchall()
+
+        patients = []
+        seen_ids = set()
+        for r in rows:
+            p_id = r[0]
+            if p_id in seen_ids:
+                continue
+            seen_ids.add(p_id)
+            patients.append({
+                "id": r[0],
+                "patient_code": r[1],
+                "first_name": r[2],
+                "last_name": r[3],
+                "full_name": f"{r[2] or ''} {r[3] or ''}".strip() or "Patient",
+                "date_of_birth": str(r[4]) if r[4] else None,
+                "gender": r[5],
+                "phone": r[6],
+                "whatsapp_number": r[7],
+                "email": r[8],
+                "address": r[9],
+                "city": r[10],
+                "state": r[11],
+                "pincode": r[12],
+                "status": r[13],
+                "created_at": str(r[14]) if r[14] else None
+            })
+        return patients
+    finally:
+        cur.close()
+        conn.close()
+
+
 def identify_patient_by_phone(phone_number: str) -> Dict[str, Any]:
     """
     Looks up primary patient in database using WhatsApp phone number.

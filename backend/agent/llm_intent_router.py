@@ -142,7 +142,7 @@ INTENT_NORMALISATION_MAP = {
     "VIEW_REPORTS":                 "PATIENT_REPORTS",
     "PATIENT_REPORTS":              "PATIENT_REPORTS",
     "THANK_YOU":                    "THANK_YOU",
-    "GOODBYE":                      "GREETING",
+    "GOODBYE":                      "GOODBYE",
     "HELP":                         "HELP",
     "LANGUAGE_CHANGE":              "GREETING",
     "POST_BOOKING":                 "APPOINTMENT_STATUS",
@@ -475,6 +475,7 @@ SYMPTOM → DEPARTMENT SEMANTIC MAPPING (use semantic understanding, not just ke
 
 SUPPORTED INTENTS (return exactly one):
 - GREETING: Hello, hi, good morning, any opening message
+- GOODBYE: Saying goodbye or farewell ("bye", "goodbye", "see you", "take care", "good night", "thanks bye", "nandri vanakkam", "போயிட்டு வரேன்", "சரி பாய்")
 - PATIENT_REGISTRATION: New patient wanting to register, first-time visitor
 - PATIENT_DETAILS: Asking for personal or dependent details, patient ID, profile info, DOB, son's details, daughter's details, child's details, "What is my patient ID?", "Tell me my details", "Show my patient information", "What is my son's patient ID?", "Show my daughter's details", "Tell me my child's DOB", "What is my son's patient number?". Do NOT classify as BOOK_APPOINTMENT unless the user explicitly asks to book an appointment.
 - BOOK_APPOINTMENT: Booking a NEW doctor appointment for symptoms, consultation, checkup ("book an appointment", "I want to see a doctor", "book appointment for my son", "my son needs an appointment")
@@ -907,7 +908,7 @@ def _rule_based_fallback(
         ]
         _dep_detail_hit = any(p in msg_lower for p in _dep_detail_kws)
 
-        if any(p in msg_lower for p in ["my personal details", "personal details", "tell my details", "show my details", "my patient profile", "my patient id", "patient id", "what is my id", "tell me my patient id", "my patient code", "my details", "patient information", "show details", "tell details", "what are my details", "show my DOB", "registered information"]) or _dep_detail_hit:
+        if any(p in msg_lower for p in ["my personal details", "personal details", "tell my details", "show my details", "my patient profile", "show my profile", "my profile", "show profile", "profile", "all profile", "all profiles", "my patient id", "patient id", "what is my id", "tell me my patient id", "my patient code", "my details", "patient information", "show details", "tell details", "what are my details", "show my DOB", "registered information"]) or _dep_detail_hit:
             canonical_intent = "PATIENT_DETAILS"
             dept = None
             doc_pref = None

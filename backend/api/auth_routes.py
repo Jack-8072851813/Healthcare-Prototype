@@ -165,8 +165,7 @@ def request_otp(body: RequestOTPRequest):
         return {
             "success": True,
             "message": f"OTP sent to registered phone ({masked_phone}) & email ({masked_email}). Valid for 10 minutes.",
-            "username": username,
-            "debug_otp": otp_code  # Provided for easy testing in demo environment
+            "username": username
         }
 
     finally:

@@ -920,3 +920,62 @@ def get_patient_identification_prompt(key: str, language: str = "ENGLISH", **kwa
         return msg
 
 
+def sanitize_patient_name(name: str) -> str:
+    """Sanitize patient name to prevent None/null/undefined rendering."""
+    if not name or not isinstance(name, str):
+        return None
+    cleaned = name.strip()
+    if cleaned.lower() in ["none", "null", "undefined", "edwin none", "unknown"]:
+        return None
+    cleaned = re.sub(r"\s+(None|null|undefined)$", "", cleaned, flags=re.IGNORECASE).strip()
+    if not cleaned or cleaned.lower() in ["none", "null", "undefined"]:
+        return None
+    return cleaned
+
+
+def get_farewell_response(language: str = "ENGLISH", patient_name: str = None) -> str:
+    """Returns a natural, language-specific farewell response using identified patient name if available."""
+    lang = (language or "ENGLISH").upper()
+    clean_name = sanitize_patient_name(patient_name)
+
+    farewells = {
+        "ENGLISH": (
+            f"Goodbye, {clean_name}! 👋\nTake care. We're here whenever you need us."
+            if clean_name else
+            "Goodbye! 👋\nTake care. We're here whenever you need us."
+        ),
+        "TAMIL": (
+            f"சென்று வாருங்கள், {clean_name}! 👋\nபத்திரமாக இருங்கள். உங்களுக்கு உதவி தேவைப்படும் போதெல்லாம் நாங்கள் இருக்கிறோம்."
+            if clean_name else
+            "சென்று வாருங்கள்! 👋\nபத்திரமாக இருங்கள். உங்களுக்கு உதவி தேவைப்படும் போதெல்லாம் நாங்கள் இருக்கிறோம்."
+        ),
+        "HINDI": (
+            f"अलविदा, {clean_name}! 👋\nअपना ख्याल रखें। जब भी आपको हमारी ज़रूरत हो, हम यहाँ हैं।"
+            if clean_name else
+            "अलविदा! 👋\nअपना ख्याल रखें। जब भी आपको हमारी ज़रूरत हो, हम यहाँ हैं।"
+        ),
+        "TELUGU": (
+            f"సెలవు, {clean_name}! 👋\nజాగ్రత్తగా ఉండండి. మీకు అవసరమైనప్పుడు మేము ఇక్కడ ఉన్నాము."
+            if clean_name else
+            "సెలవు! 👋\nజాగ్రత్తగా ఉండండి. మీకు అవసరమైనప్పుడు మేము ఇక్కడ ఉన్నాము."
+        ),
+        "MALAYALAM": (
+            f"വിട, {clean_name}! 👋\nശ്രദ്ധിക്കുക. നിങ്ങൾക്ക് ആവശ്യമുള്ളപ്പോഴെല്ലാം ഞങ്ങൾ ഇവിടെയുണ്ട്."
+            if clean_name else
+            "വിട! 👋\nശ്രദ്ധിക്കുക. നിങ്ങൾക്ക് ആവശ്യമുള്ളപ്പോഴെല്ലാം ഞങ്ങൾ ഇവിടെയുണ്ട്."
+        ),
+        "KANNADA": (
+            f"ವಿದಾಯ, {clean_name}! 👋\nಕಾಳಜಿ ವಹಿಸಿ. ನಿಮಗೆ ಅಗತ್ಯವಿದ್ದಾಗ ನಾವು ಇಲ್ಲಿದ್ದೇವೆ."
+            if clean_name else
+            "ವಿದಾಯ! 👋\nಕಾಳಜಿ ವಹಿಸಿ. ನಿಮಗೆ ಅಗತ್ಯವಿದ್ದಾಗ ನಾವು ಇಲ್ಲಿದ್ದೇವೆ."
+        ),
+        "URDU": (
+            f"خدا حافظ، {clean_name}! 👋\nअपना خیال رکھیں۔ جب بھی اپ کو ضرورت ہو ہم یہاں ہیں۔"
+            if clean_name else
+            "خدا حافظ! 👋\nअपना خیال رکھیں۔ جب بھی اپ کو ضرورت ہو ہم یہاں ہیں۔"
+        )
+    }
+    return farewells.get(lang, farewells["ENGLISH"])
+
+
+

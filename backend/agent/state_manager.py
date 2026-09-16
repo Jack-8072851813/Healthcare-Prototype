@@ -172,17 +172,19 @@ def get_conversation_state(conversation_code: str, whatsapp_number: str = "91999
             state["intent"] = db_intent or "GREETING"
             
         # Reconcile & validate candidate patient_id against patients table
-        candidate_patient_id = state.get("patient_id")
+        candidate_patient_id = state.get("selected_patient_id") or state.get("patient_id")
         valid_patient_id = resolve_valid_patient_id(cur, candidate_patient_id, effective_wnum)
         
+        if state.get("selected_patient_id"):
+            valid_sel = resolve_valid_patient_id(cur, state.get("selected_patient_id"), None)
+            if valid_sel:
+                state["selected_patient_id"] = valid_sel
+                valid_patient_id = valid_sel
+
         state["patient_id"] = valid_patient_id
         if isinstance(state.get("entities"), dict):
             state["entities"]["patient_id"] = valid_patient_id
 
-        if db_pat_id != valid_patient_id:
-            cur.execute("UPDATE conversations SET patient_id = %s WHERE id = %s;", (valid_patient_id, conv_db_id))
-            conn.commit()
-            
         return state
     except Exception as e:
         conn.rollback()
@@ -199,7 +201,7 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
     conn = db_config.get_db_connection()
     cur = conn.cursor()
     try:
-        candidate_patient_id = state_dict.get("patient_id")
+        candidate_patient_id = state_dict.get("selected_patient_id") or state_dict.get("patient_id")
         wnum = None
         # Only query whatsapp_number if patient_id is not already resolved
         if not candidate_patient_id:
@@ -214,6 +216,12 @@ def save_conversation_state(conversation_code: str, state_dict: dict):
         
         valid_patient_id = resolve_valid_patient_id(cur, candidate_patient_id, wnum)
         
+        if state_dict.get("selected_patient_id"):
+            valid_sel = resolve_valid_patient_id(cur, state_dict.get("selected_patient_id"), None)
+            if valid_sel:
+                state_dict["selected_patient_id"] = valid_sel
+                valid_patient_id = valid_sel
+
         state_dict["patient_id"] = valid_patient_id
         if isinstance(state_dict.get("entities"), dict):
             state_dict["entities"]["patient_id"] = valid_patient_id
