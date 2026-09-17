@@ -255,9 +255,9 @@ MENU_BUTTON_TRANSLATIONS = {
         "btn_my_profile": "My Profile",
         "btn_my_appts": "My Appointments",
         "btn_cancel_appt": "Cancel Appointment",
-        "btn_reschedule_appt": "Reschedule Appt",
+        "btn_reschedule_appt": "Reschedule Appointment",
         "btn_new_patient": "New Patient",
-        "btn_hosp_info": "Hospital Info",
+        "btn_hosp_info": "Hospital Information",
         "btn_my_reports": "My Reports",
         "btn_preadmission": "Pre-Admission",
         "btn_my_documents": "Documents / Forms",
@@ -570,7 +570,7 @@ def get_translated_button(btn_id: str, language: str = "ENGLISH") -> dict:
             raw_title = "Talk to Staff"
         elif btn_id == "btn_emergency":
             raw_title = "Emergency"
-    res = {"id": btn_id, "title": str(raw_title)[:20]}
+    res = {"id": btn_id, "title": str(raw_title)[:24]}
     if btn_id in MENU_BUTTON_DESCRIPTIONS:
         res["description"] = MENU_BUTTON_DESCRIPTIONS[btn_id]
     return res

@@ -81,100 +81,42 @@ def get_all_patients_by_phone(phone_number: str) -> List[Dict[str, Any]]:
 
 def identify_patient_by_phone(phone_number: str) -> Dict[str, Any]:
     """
-    Looks up primary patient in database using WhatsApp phone number.
-    Returns dictionary with patient status and data.
+    Looks up patients in database using WhatsApp phone number.
+    If exactly 1 patient is found, returns EXISTING_PATIENT with patient data.
+    If > 1 patients are found, returns MULTIPLE_PATIENTS with patient=None (DO NOT AUTO-SELECT).
+    If 0 patients found, returns NEW_PATIENT.
     """
     if not phone_number:
         return {
             "found": False,
             "status": "NEW_PATIENT",
-            "patient": None
+            "patient": None,
+            "patients": []
         }
 
-    conn = db_config.get_db_connection()
-    cur = conn.cursor()
     try:
-        cond = get_phone_query_condition()
-        params = get_phone_query_params(phone_number)
-        
-        # Primary non-dependent patient first
-        cur.execute(f"""
-            SELECT id, patient_code, first_name, last_name, date_of_birth, gender,
-                   phone, whatsapp_number, email, address, city, state, pincode, status, created_at
-            FROM patients
-            WHERE {cond} AND status = 'ACTIVE' AND (is_dependent = FALSE OR is_dependent IS NULL)
-            ORDER BY id ASC
-            LIMIT 1;
-        """, params)
-        row = cur.fetchone()
-
-        # Fallback to any patient record if primary flag not set
-        if not row:
-            cur.execute(f"""
-                SELECT id, patient_code, first_name, last_name, date_of_birth, gender,
-                       phone, whatsapp_number, email, address, city, state, pincode, status, created_at
-                FROM patients
-                WHERE {cond} AND status = 'ACTIVE'
-                ORDER BY id ASC
-                LIMIT 1;
-            """, params)
-            row = cur.fetchone()
-
-        if row:
-            patient_info = {
-                "id": row[0],
-                "patient_code": row[1],
-                "first_name": row[2],
-                "last_name": row[3],
-                "full_name": f"{row[2] or ''} {row[3] or ''}".strip() or "Patient",
-                "date_of_birth": str(row[4]) if row[4] else None,
-                "gender": row[5],
-                "phone": row[6],
-                "whatsapp_number": row[7],
-                "email": row[8],
-                "address": row[9],
-                "city": row[10],
-                "state": row[11],
-                "pincode": row[12],
-                "status": row[13],
-                "created_at": str(row[14]) if row[14] else None
+        all_pats = get_all_patients_by_phone(phone_number)
+        if not all_pats:
+            return {
+                "found": False,
+                "status": "NEW_PATIENT",
+                "patient": None,
+                "patients": []
             }
+
+        if len(all_pats) == 1:
             return {
                 "found": True,
                 "status": "EXISTING_PATIENT",
-                "patient": patient_info
+                "patient": all_pats[0],
+                "patients": all_pats
             }
-        
-        # Check if conversation exists for contact without formal patient row
-        cur.execute("""
-            SELECT id, patient_id FROM conversations
-            WHERE whatsapp_number = %s
-            ORDER BY id DESC LIMIT 1;
-        """, (phone_number,))
-        conv_row = cur.fetchone()
-        if conv_row and conv_row[1]:
-            cur.execute("SELECT id, patient_code, first_name, last_name, date_of_birth, gender FROM patients WHERE id = %s;", (conv_row[1],))
-            p_row = cur.fetchone()
-            if p_row:
-                patient_info = {
-                    "id": p_row[0],
-                    "patient_code": p_row[1],
-                    "first_name": p_row[2],
-                    "last_name": p_row[3],
-                    "full_name": f"{p_row[2] or ''} {p_row[3] or ''}".strip() or "Patient",
-                    "date_of_birth": str(p_row[4]) if p_row[4] else None,
-                    "gender": p_row[5],
-                }
-                return {
-                    "found": True,
-                    "status": "EXISTING_PATIENT",
-                    "patient": patient_info
-                }
 
         return {
-            "found": False,
-            "status": "NEW_PATIENT",
-            "patient": None
+            "found": True,
+            "status": "MULTIPLE_PATIENTS",
+            "patient": None,
+            "patients": all_pats
         }
 
     except Exception as e:
@@ -183,6 +125,7 @@ def identify_patient_by_phone(phone_number: str) -> Dict[str, Any]:
             "found": False,
             "status": "NEW_PATIENT",
             "patient": None,
+            "patients": [],
             "error": str(e)
         }
     finally:

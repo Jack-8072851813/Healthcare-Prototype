@@ -256,7 +256,7 @@ def send_button_message(to_number: str, text: str, buttons: list, list_button_ti
         send_text_message(to_number, text)
         text = "Please choose an option below:"
 
-    if len(buttons) > 3:
+    if len(buttons) > 3 or any(len(str(b.get("title", ""))) > 20 for b in buttons):
         rows = []
         # Meta WhatsApp Cloud API limits interactive list messages to max 10 rows total across all sections.
         for btn in buttons[:10]:
